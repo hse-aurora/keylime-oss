@@ -1,0 +1,15 @@
+name: HPE - Deploy Staging Environment
+
+on: [push, workflow_dispatch]
+
+jobs:
+  call-workflow-in-keylime-ci-repo:
+    uses: hse-aurora/keylime-ci/.github/workflows/gcp-deploy.yml@main
+    with:
+      vrt_repo: ${{ github.repository }}
+      vrt_ref: ${{ github.ref }}
+      a_repo: hse-aurora/rust-keylime-fork
+      a_ref: master
+      gcp_id: stage-vrt
+    secrets:
+      SSH_KEYLIME_CI_DEPLOY_KEY: ${{ secrets.SSH_KEYLIME_CI_DEPLOY_KEY }}
