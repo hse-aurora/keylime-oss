@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from cryptography.hazmat.primitives import serialization as crypto_serialization
 
-from keylime import cert_utils, config, json, keylime_logging
+from keylime import cert_utils, config, json, keylime_logging, cmd_exec
 from keylime.agentstates import AgentAttestState, TPMClockInfo
 from keylime.common.algorithms import Hash
 from keylime.failure import Component, Failure
@@ -76,7 +76,8 @@ class Tpm:
             digestpath,
             attestpath
         ]
-        self.__run(command, lock=False)
+        EXIT_SUCCESS: int=0
+        retDict = cmd_exec.run(cmd=command, expectedcode=EXIT_SUCCESS, raiseOnError=False)
 
         # process iak pub key and import into tpm, get pub key context from tpm
         iakpub = tpm2_objects.pubkey_from_tpm2b_public(iak_tpm)
@@ -95,14 +96,13 @@ class Tpm:
             "-c",
             iakcontext,
         ]
-        self.__run(command, lock=False)
+        retDict = cmd_exec.run(cmd=command, expectedcode=EXIT_SUCCESS, raiseOnError=False)
 
         # get signature and ticket files, run verifysignature of signature on digest with iak pub context
         # verification failure is tpm error that will return false
-        iak_sign = iak_sign.hex()
         sigd, sigpath = tempfile.mkstemp()
         with open(sigpath, 'wb') as f:
-            f.write(binascii.unhexlify(iak_sign))
+            f.write(iak_sign)
         ticketd, ticketpath = tempfile.mkstemp()
         try:
             command = [
@@ -116,12 +116,13 @@ class Tpm:
                 "-t",
                 ticketpath
             ]
-            self.__run(command, lock=False)
-            logger.info("Agent %s AIK verified with IAK", uuid)
-            return True
+            verifyretDict = cmd_exec.run(cmd=command, expectedcode=EXIT_SUCCESS, raiseOnError=False)
         except:
             logger.warning("Agent %s AIK verification failed", uuid)
             return False
+        if verifyretDict["code"] == 0:
+            logger.info("Agent %s AIK verified with IAK", uuid)
+            return True
         return False
 
     @staticmethod
