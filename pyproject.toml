@@ -20,16 +20,13 @@ line_length = 120
 include = ["keylime", "test"]
 ignore = [
     "keylime/backport_dataclasses.py",
-    "keylime/elchecking/",
+    "keylime/mba/elchecking/",
     "keylime/migrations/versions/",
     "keylime/da/examples/tsa_rfc3161.py",
     "keylime/da/examples/sqldb.py",
     "keylime/da/examples/redis.py",
     "keylime/da/examples/file.py",
     "keylime/da/record.py",
-    "test/oldtest.py",
-    "test/test_ima_dm.py",
-    "test/test_restful.py",
     "test/data/template-invalid-adjust/2.0/adjust.py",
 ]
 reportMissingImports = false

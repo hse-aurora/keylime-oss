@@ -73,14 +73,7 @@ def init_tls_dir(component: str, logger: Optional[Logger] = None) -> str:
         tls_dir = os.path.abspath(os.path.join(config.WORK_DIR, generatedir))
         ca_path = os.path.join(tls_dir, "cacert.crt")
 
-        key_store_pw = config.get("ca", "password")
-        if key_store_pw:
-            if key_store_pw == "default":
-                if logger:
-                    logger.warning("Using 'default' password option from CA configuration file")
-            key_store_pw = str(key_store_pw)
-
-        ca_util.setpassword(key_store_pw)
+        ca_util.read_password(None)
 
         if os.path.exists(ca_path):
             if logger:
@@ -132,10 +125,8 @@ def init_tls_dir(component: str, logger: Optional[Logger] = None) -> str:
     elif tls_dir == "default":
         # Use the keys/certificates generated for the verifier
         tls_dir = os.path.abspath(os.path.join(config.WORK_DIR, "cv_ca"))
-        if not os.path.exists(os.path.join(tls_dir, "cacert.crt")):
-            raise Exception(
-                "It appears that the verifier has not yet created a CA and certificates, please run the verifier first"
-            )
+        if not os.path.exists(tls_dir):
+            raise Exception(f"It appears that the specified tls_dir does not exist: {tls_dir}")
     else:
         # if it is relative path, convert to absolute in WORK_DIR
         tls_dir = os.path.abspath(os.path.join(config.WORK_DIR, tls_dir))
@@ -387,7 +378,7 @@ def echo_json_response(
     handler: Any, code: int, status: Optional[str] = None, results: Optional[Dict[str, Any]] = None
 ) -> bool:
     """Takes a json package and returns it to the user w/ full HTTP headers"""
-    if handler is None or code is None:
+    if handler is None:
         return False
     if status is None:
         status = http.client.responses[code]

@@ -1,9 +1,8 @@
 import sys
 import threading
-from typing import Any, Dict, Optional, Set
+from typing import Dict, Optional, Set
 
 from keylime.common.algorithms import Hash
-from keylime.ima.ast import get_FF_HASH, get_START_HASH
 from keylime.ima.file_signatures import ImaKeyrings
 
 if sys.version_info >= (3, 7):
@@ -20,14 +19,7 @@ class TPMClockInfo:
     safe: int
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TPMClockInfo":
-        dclki: Dict[str, int] = {}
-        if "clockInfo" in data:
-            dclki = data["clockInfo"]
-
-        if "clock" in data:
-            dclki = data
-
+    def from_dict(cls, dclki: Dict[str, int]) -> "TPMClockInfo":
         return cls(
             clock=dclki.get("clock", 0),
             resetcount=dclki.get("resetCount", 0),
@@ -36,12 +28,12 @@ class TPMClockInfo:
         )
 
     def to_dict(self) -> Dict[str, int]:
-        data = {}
-        data["clock"] = self.clock
-        data["resetCount"] = self.resetcount
-        data["restartCount"] = self.restartcount
-        data["safe"] = self.safe
-        return data
+        return {
+            "clock": self.clock,
+            "resetCount": self.resetcount,
+            "restartCount": self.restartcount,
+            "safe": self.safe,
+        }
 
 
 class TPMState:
@@ -64,9 +56,9 @@ class TPMState:
 
         if self.pcrs[pcr_num] is None:
             if 17 <= pcr_num <= 23:
-                self.pcrs[pcr_num] = get_FF_HASH(self.hash_alg[pcr_num])
+                self.pcrs[pcr_num] = self.hash_alg[pcr_num].get_ff_hash()
             else:
-                self.pcrs[pcr_num] = get_START_HASH(self.hash_alg[pcr_num])
+                self.pcrs[pcr_num] = self.hash_alg[pcr_num].get_start_hash()
 
     def reset_pcr(self, pcr_num: int) -> None:
         """Reset a specific PCR"""

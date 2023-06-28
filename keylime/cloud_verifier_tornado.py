@@ -7,7 +7,7 @@ import sys
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Process
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import tornado.httpserver
 import tornado.ioloop
@@ -17,7 +17,7 @@ import tornado.web
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.orm.exc import NoResultFound
+from sqlalchemy.orm.exc import NoResultFound  # pyright: ignore
 
 from keylime import api_version as keylime_api_version
 from keylime import (
@@ -35,7 +35,6 @@ from keylime.common import retry, states, validators
 from keylime.da import record
 from keylime.db.keylime_db import DBEngineManager, SessionManager
 from keylime.db.verifier_db import VerfierMain, VerifierAllowlist
-from keylime.elchecking import policies
 from keylime.failure import MAX_SEVERITY_LABEL, Component, Event, Failure, set_severity_config
 from keylime.ima import ima
 
@@ -297,6 +296,49 @@ class VersionHandler(BaseHandler):
 
 
 class AgentsHandler(BaseHandler):
+    def __validate_input(self, method: str) -> Tuple[Optional[Dict[str, Union[str, None]]], Optional[str]]:
+        if self.request.uri is None:
+            web_util.echo_json_response(self, 400, "URI not specified")
+            return None, None
+
+        rest_params = web_util.get_restful_params(self.request.uri)
+        if rest_params is None:
+            web_util.echo_json_response(self, 405, "Not Implemented: Use /agents/ interface")
+            return None, None
+
+        if not web_util.validate_api_version(self, cast(str, rest_params["api_version"]), logger):
+            return None, None
+
+        if "agents" not in rest_params:
+            web_util.echo_json_response(self, 400, "uri not supported")
+            if method != "DELETE":
+                logger.warning("%s returning 400 response. uri not supported: %s", method, self.request.path)
+            return None, None
+
+        agent_id = rest_params["agents"]
+
+        validate_agent_id = False
+        if method == "GET":
+            validate_agent_id = (agent_id is not None) and (agent_id != "")
+        elif method in ["PUT", "DELETE"]:
+            if agent_id is None:
+                web_util.echo_json_response(self, 400, "uri not supported")
+                logger.warning("%s returning 400 response. uri not supported", method)
+                if method == "DELETE":
+                    return None, None
+
+            validate_agent_id = True
+        else:
+            validate_agent_id = agent_id is not None
+
+        # If the agent ID is not valid (wrong set of characters), just do nothing.
+        if validate_agent_id and not validators.valid_agent_id(agent_id):
+            web_util.echo_json_response(self, 400, "agent_id not not valid")
+            logger.error("%s received an invalid agent ID: %s", method, agent_id)
+            return None, None
+
+        return rest_params, agent_id
+
     def head(self) -> None:
         """HEAD not supported"""
         web_util.echo_json_response(self, 405, "HEAD not supported")
@@ -312,33 +354,13 @@ class AgentsHandler(BaseHandler):
         """
         session = get_session()
 
-        if self.request.uri is None:
-            web_util.echo_json_response(self, 400, "URI not specified")
+        rest_params, agent_id = self.__validate_input("GET")
+        if not rest_params:
             return
-
-        rest_params = web_util.get_restful_params(self.request.uri)
-        if rest_params is None:
-            web_util.echo_json_response(self, 405, "Not Implemented: Use /agents/ interface")
-            return
-
-        if not web_util.validate_api_version(self, cast(str, rest_params["api_version"]), logger):
-            return
-
-        if "agents" not in rest_params:
-            web_util.echo_json_response(self, 400, "uri not supported")
-            logger.warning("GET returning 400 response. uri not supported: %s", self.request.path)
-            return
-
-        agent_id = rest_params["agents"]
 
         if (agent_id is not None) and (agent_id != ""):
             # If the agent ID is not valid (wrong set of characters),
             # just do nothing.
-            if not validators.valid_agent_id(agent_id):
-                web_util.echo_json_response(self, 400, "agent_id not not valid")
-                logger.error("GET received an invalid agent ID: %s", agent_id)
-                return
-
             agent = None
             try:
                 agent = (
@@ -413,34 +435,8 @@ class AgentsHandler(BaseHandler):
         """
         session = get_session()
 
-        if self.request.uri is None:
-            web_util.echo_json_response(self, 400, "URI not specified")
-            return
-
-        rest_params = web_util.get_restful_params(self.request.uri)
-        if rest_params is None:
-            web_util.echo_json_response(self, 405, "Not Implemented: Use /agents/ interface")
-            return
-
-        if not web_util.validate_api_version(self, cast(str, rest_params["api_version"]), logger):
-            return
-
-        if "agents" not in rest_params:
-            web_util.echo_json_response(self, 400, "uri not supported")
-            return
-
-        agent_id = rest_params["agents"]
-
-        if agent_id is None:
-            web_util.echo_json_response(self, 400, "uri not supported")
-            logger.warning("DELETE returning 400 response. uri not supported: %s", self.request.path)
-            return
-
-        # If the agent ID is not valid (wrong set of characters), just
-        # do nothing.
-        if not validators.valid_agent_id(agent_id):
-            web_util.echo_json_response(self, 400, "agent_id not not valid")
-            logger.error("DELETE received an invalid agent ID: %s", agent_id)
+        rest_params, agent_id = self.__validate_input("DELETE")
+        if not rest_params or not agent_id:
             return
 
         agent = None
@@ -501,71 +497,50 @@ class AgentsHandler(BaseHandler):
         # TODO: exception handling needs fixing
         # Maybe handle exceptions with if/else if/else blocks ... simple and avoids nesting
         try:  # pylint: disable=too-many-nested-blocks
-            if self.request.uri is None:
-                web_util.echo_json_response(self, 400, "URI not specified")
+            rest_params, agent_id = self.__validate_input("POST")
+            if not rest_params:
                 return
-
-            rest_params = web_util.get_restful_params(self.request.uri)
-            if rest_params is None:
-                web_util.echo_json_response(self, 405, "Not Implemented: Use /agents/ interface")
-                return
-
-            if not web_util.validate_api_version(self, cast(str, rest_params["api_version"]), logger):
-                return
-
-            if "agents" not in rest_params:
-                web_util.echo_json_response(self, 400, "uri not supported")
-                logger.warning("POST returning 400 response. uri not supported: %s", self.request.path)
-                return
-
-            agent_id = rest_params["agents"]
 
             if agent_id is not None:
-                # If the agent ID is not valid (wrong set of
-                # characters), just do nothing.
-                if not validators.valid_agent_id(agent_id):
-                    web_util.echo_json_response(self, 400, "agent_id not not valid")
-                    logger.error("POST received an invalid agent ID: %s", agent_id)
-                    return
-
                 content_length = len(self.request.body)
                 if content_length == 0:
                     web_util.echo_json_response(self, 400, "Expected non zero content length")
                     logger.warning("POST returning 400 response. Expected non zero content length.")
                 else:
                     json_body = json.loads(self.request.body)
-                    agent_data = {}
-                    agent_data["v"] = json_body["v"]
-                    agent_data["ip"] = json_body["cloudagent_ip"]
-                    agent_data["port"] = int(json_body["cloudagent_port"])
-                    agent_data["operational_state"] = states.START
-                    agent_data["public_key"] = ""
-                    agent_data["tpm_policy"] = json_body["tpm_policy"]
-                    agent_data["meta_data"] = json_body["metadata"]
-                    agent_data["mb_refstate"] = json_body["mb_refstate"]
-                    agent_data["ima_sign_verification_keys"] = json_body["ima_sign_verification_keys"]
-                    agent_data["revocation_key"] = json_body["revocation_key"]
-                    agent_data["accept_tpm_hash_algs"] = json_body["accept_tpm_hash_algs"]
-                    agent_data["accept_tpm_encryption_algs"] = json_body["accept_tpm_encryption_algs"]
-                    agent_data["accept_tpm_signing_algs"] = json_body["accept_tpm_signing_algs"]
-                    agent_data["supported_version"] = json_body["supported_version"]
-                    agent_data["ak_tpm"] = json_body["ak_tpm"]
-                    agent_data["mtls_cert"] = json_body.get("mtls_cert", None)
-                    agent_data["hash_alg"] = ""
-                    agent_data["enc_alg"] = ""
-                    agent_data["sign_alg"] = ""
-                    agent_data["agent_id"] = agent_id
-                    agent_data["boottime"] = 0
-                    agent_data["ima_pcrs"] = []
-                    agent_data["pcr10"] = None
-                    agent_data["next_ima_ml_entry"] = 0
-                    agent_data["learned_ima_keyrings"] = {}
-                    agent_data["verifier_id"] = config.get(
-                        "verifier", "uuid", fallback=cloud_verifier_common.DEFAULT_VERIFIER_ID
-                    )
-                    agent_data["attestation_count"] = 0
-                    agent_data["last_received_quote"] = 0
-                    agent_data["last_successful_attestation"] = 0
+                    agent_data = {
+                        "v": json_body["v"],
+                        "ip": json_body["cloudagent_ip"],
+                        "port": int(json_body["cloudagent_port"]),
+                        "operational_state": states.START,
+                        "public_key": "",
+                        "tpm_policy": json_body["tpm_policy"],
+                        "meta_data": json_body["metadata"],
+                        "mb_refstate": json_body["mb_refstate"],
+                        "ima_sign_verification_keys": json_body["ima_sign_verification_keys"],
+                        "revocation_key": json_body["revocation_key"],
+                        "accept_tpm_hash_algs": json_body["accept_tpm_hash_algs"],
+                        "accept_tpm_encryption_algs": json_body["accept_tpm_encryption_algs"],
+                        "accept_tpm_signing_algs": json_body["accept_tpm_signing_algs"],
+                        "supported_version": json_body["supported_version"],
+                        "ak_tpm": json_body["ak_tpm"],
+                        "mtls_cert": json_body.get("mtls_cert", None),
+                        "hash_alg": "",
+                        "enc_alg": "",
+                        "sign_alg": "",
+                        "agent_id": agent_id,
+                        "boottime": 0,
+                        "ima_pcrs": [],
+                        "pcr10": None,
+                        "next_ima_ml_entry": 0,
+                        "learned_ima_keyrings": {},
+                        "verifier_id": config.get(
+                            "verifier", "uuid", fallback=cloud_verifier_common.DEFAULT_VERIFIER_ID
+                        ),
+                        "attestation_count": 0,
+                        "last_received_quote": 0,
+                        "last_successful_attestation": 0,
+                    }
 
                     if "verifier_ip" in json_body:
                         agent_data["verifier_ip"] = json_body["verifier_ip"]
@@ -742,34 +717,8 @@ class AgentsHandler(BaseHandler):
         """
         session = get_session()
         try:
-            if self.request.uri is None:
-                web_util.echo_json_response(self, 400, "URI not specified")
-                return
-
-            rest_params = web_util.get_restful_params(self.request.uri)
-            if rest_params is None:
-                web_util.echo_json_response(self, 405, "Not Implemented: Use /agents/ interface")
-                return
-
-            if not web_util.validate_api_version(self, cast(str, rest_params["api_version"]), logger):
-                return
-
-            if "agents" not in rest_params:
-                web_util.echo_json_response(self, 400, "uri not supported")
-                logger.warning("PUT returning 400 response. uri not supported: %s", self.request.path)
-                return
-
-            agent_id = rest_params["agents"]
-
-            if agent_id is None:
-                web_util.echo_json_response(self, 400, "uri not supported")
-                logger.warning("PUT returning 400 response. uri not supported")
-
-            # If the agent ID is not valid (wrong set of characters),
-            # just do nothing.
-            if not validators.valid_agent_id(agent_id):
-                web_util.echo_json_response(self, 400, "agent_id not not valid")
-                logger.error("PUT received an invalid agent ID: %s", agent_id)
+            rest_params, agent_id = self.__validate_input("PUT")
+            if not rest_params:
                 return
 
             try:
@@ -926,15 +875,13 @@ class AllowlistHandler(BaseHandler):
         self.finish()
         logger.info("DELETE returning 204 response for allowlist: %s", allowlist_name)
 
-    def __get_runtime_policy_db_format(self, runtime_policy_name: str) -> Optional[Dict[str, Any]]:
+    def __get_runtime_policy_db_format(self, runtime_policy_name: str) -> Dict[str, Any]:
         """Get the IMA policy from the request and return it in Db format"""
         content_length = len(self.request.body)
         if content_length == 0:
             web_util.echo_json_response(self, 400, "Expected non zero content length")
             logger.warning("POST returning 400 response. Expected non zero content length.")
-            return None
-
-        runtime_policy = "{}"
+            return {}
 
         json_body = json.loads(self.request.body)
 
@@ -953,7 +900,7 @@ class AllowlistHandler(BaseHandler):
         except ima.ImaValidationError as e:
             web_util.echo_json_response(self, e.code, e.message)
             logger.warning(e.message)
-            return None
+            return {}
 
         tpm_policy = json_body.get("tpm_policy")
 
@@ -963,7 +910,7 @@ class AllowlistHandler(BaseHandler):
             message = f"Runtime policy is malformatted: {e.message}"
             web_util.echo_json_response(self, e.code, message)
             logger.warning(message)
-            return None
+            return {}
 
         return runtime_policy_db_format
 
@@ -1055,8 +1002,7 @@ async def invoke_get_quote(
     agent: Dict[str, Any], runtime_policy: str, need_pubkey: bool, timeout: float = 60.0
 ) -> None:
     failure = Failure(Component.INTERNAL, ["verifier"])
-    if agent is None:
-        raise Exception("agent deleted while being processed")
+
     params = cloud_verifier_common.prepare_get_quote(agent)
 
     partial_req = "1"
@@ -1064,23 +1010,18 @@ async def invoke_get_quote(
         partial_req = "0"
 
     # TODO: remove special handling after initial upgrade
+    kwargs = {}
     if agent["ssl_context"]:
-        res = tornado_requests.request(
-            "GET",
-            f"https://{agent['ip']}:{agent['port']}/v{agent['supported_version']}/quotes/integrity"
-            f"?nonce={params['nonce']}&mask={params['mask']}"
-            f"&partial={partial_req}&ima_ml_entry={params['ima_ml_entry']}",
-            context=agent["ssl_context"],
-            timeout=timeout,
-        )
-    else:
-        res = tornado_requests.request(
-            "GET",
-            f"http://{agent['ip']}:{agent['port']}/v{agent['supported_version']}/quotes/integrity"
-            f"?nonce={params['nonce']}&mask={params['mask']}"
-            f"&partial={partial_req}&ima_ml_entry={params['ima_ml_entry']}",
-            timeout=timeout,
-        )
+        kwargs["context"] = agent["ssl_context"]
+
+    res = tornado_requests.request(
+        "GET",
+        f"http://{agent['ip']}:{agent['port']}/v{agent['supported_version']}/quotes/integrity"
+        f"?nonce={params['nonce']}&mask={params['mask']}"
+        f"&partial={partial_req}&ima_ml_entry={params['ima_ml_entry']}",
+        **kwargs,
+        timeout=timeout,
+    )
     response = await res
 
     if response.status_code != 200:
@@ -1133,33 +1074,26 @@ async def invoke_get_quote(
             asyncio.ensure_future(process_agent(agent, states.FAILED, failure))
 
 
-async def invoke_provide_v(agent: Optional[Dict[str, Any]], timeout: float = 60.0) -> None:
+async def invoke_provide_v(agent: Dict[str, Any], timeout: float = 60.0) -> None:
     failure = Failure(Component.INTERNAL, ["verifier"])
-    if agent is None:
-        raise Exception("Agent deleted while being processed")
-    try:
-        if agent["pending_event"] is not None:
-            agent["pending_event"] = None
-    except KeyError:
-        pass
+
+    if agent.get("pending_event") is not None:
+        agent["pending_event"] = None
+
     v_json_message = cloud_verifier_common.prepare_v(agent)
 
     # TODO: remove special handling after initial upgrade
+    kwargs = {}
     if agent["ssl_context"]:
-        res = tornado_requests.request(
-            "POST",
-            f"https://{agent['ip']}:{agent['port']}/v{agent['supported_version']}/keys/vkey",
-            data=v_json_message,
-            context=agent["ssl_context"],
-            timeout=timeout,
-        )
-    else:
-        res = tornado_requests.request(
-            "POST",
-            f"http://{agent['ip']}:{agent['port']}/v{agent['supported_version']}/keys/vkey",
-            data=v_json_message,
-            timeout=timeout,
-        )
+        kwargs["context"] = agent["ssl_context"]
+
+    res = tornado_requests.request(
+        "POST",
+        f"http://{agent['ip']}:{agent['port']}/v{agent['supported_version']}/keys/vkey",
+        data=v_json_message,
+        **kwargs,
+        timeout=timeout,
+    )
 
     response = await res
 
@@ -1179,10 +1113,7 @@ async def invoke_provide_v(agent: Optional[Dict[str, Any]], timeout: float = 60.
         asyncio.ensure_future(process_agent(agent, states.GET_QUOTE))
 
 
-async def invoke_notify_error(agent: Optional[Dict[str, Any]], tosend: Dict[str, Any], timeout: float = 60.0) -> None:
-    if agent is None:
-        logger.warning("Agent deleted while being processed")
-        return
+async def invoke_notify_error(agent: Dict[str, Any], tosend: Dict[str, Any], timeout: float = 60.0) -> None:
     kwargs = {
         "data": tosend,
     }
@@ -1250,10 +1181,6 @@ async def notify_error(
 async def process_agent(
     agent: Dict[str, Any], new_operational_state: int, failure: Failure = Failure(Component.INTERNAL, ["verifier"])
 ) -> None:
-    # Convert to dict if the agent arg is a db object
-    if not isinstance(agent, dict):
-        agent = _from_db_obj(agent)
-
     session = get_session()
     try:  # pylint: disable=R1702
         main_agent_operational_state = agent["operational_state"]
@@ -1278,7 +1205,7 @@ async def process_agent(
             return
 
         # if the user did terminated this agent
-        if stored_agent.operational_state == states.TERMINATED:
+        if stored_agent.operational_state == states.TERMINATED:  # pyright: ignore
             logger.warning("Agent %s terminated by user.", agent["agent_id"])
             if agent["pending_event"] is not None:
                 tornado.ioloop.IOLoop.current().remove_timeout(agent["pending_event"])
@@ -1286,7 +1213,7 @@ async def process_agent(
             return
 
         # if the user tells us to stop polling because the tenant quote check failed
-        if stored_agent.operational_state == states.TENANT_FAILED:
+        if stored_agent.operational_state == states.TENANT_FAILED:  # pyright: ignore
             logger.warning("Agent %s has failed tenant quote. Stopping polling", agent["agent_id"])
             if agent["pending_event"] is not None:
                 tornado.ioloop.IOLoop.current().remove_timeout(agent["pending_event"])
@@ -1461,9 +1388,9 @@ async def activate_agents(agents: List[VerfierMain], verifier_ip: str, verifier_
                 "verifier", agent_run["mtls_cert"], logger=logger
             )
 
-        if agent.operational_state == states.START:
+        if agent.operational_state == states.START:  # pyright: ignore
             asyncio.ensure_future(process_agent(agent_run, states.GET_QUOTE))
-        if agent.boottime:
+        if agent.boottime:  # pyright: ignore
             ima_pcrs_dict = {}
             assert isinstance(agent.ima_pcrs, list)
             for pcr_num in agent.ima_pcrs:
@@ -1495,12 +1422,6 @@ def main() -> None:
     verifier_port = config.get("verifier", "port")
     verifier_host = config.get("verifier", "ip")
     verifier_id = config.get("verifier", "uuid", fallback=cloud_verifier_common.DEFAULT_VERIFIER_ID)
-
-    # Check if measured boot was configured correctly
-    mb_policy_name = config.get("verifier", "measured_boot_policy_name", fallback="accept-all")
-    if mb_policy_name and policies.get_policy(mb_policy_name) is None:
-        logger.error('Measured boot policy "%s" could not be found!', mb_policy_name)
-        raise Exception(f'Measued boot policy "{mb_policy_name}" could not be found!')
 
     # allow tornado's max upload size to be configurable
     max_upload_size = None

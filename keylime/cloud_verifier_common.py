@@ -10,20 +10,20 @@ from keylime.db.verifier_db import VerfierMain
 from keylime.failure import Component, Event, Failure
 from keylime.ima import file_signatures
 from keylime.ima.types import RuntimePolicyType
-from keylime.tpm.tpm_abstract import TPM_Utilities
-from keylime.tpm.tpm_main import tpm
+from keylime.tpm import tpm_util
+from keylime.tpm.tpm_main import Tpm
 
 # setup logging
 logger = keylime_logging.init_logging("cloudverifier_common")
 
-GLOBAL_TPM_INSTANCE: Optional[tpm] = None
+GLOBAL_TPM_INSTANCE: Optional[Tpm] = None
 DEFAULT_VERIFIER_ID: str = "default"
 
 
-def get_tpm_instance() -> tpm:
+def get_tpm_instance() -> Tpm:
     global GLOBAL_TPM_INSTANCE
     if GLOBAL_TPM_INSTANCE is None:
-        GLOBAL_TPM_INSTANCE = tpm()
+        GLOBAL_TPM_INSTANCE = Tpm()
     return GLOBAL_TPM_INSTANCE
 
 
@@ -99,11 +99,6 @@ def process_quote_response(
     enc_alg = json_response.get("enc_alg")
     sign_alg = json_response.get("sign_alg")
 
-    # Update chosen tpm and algorithms
-    agent["hash_alg"] = hash_alg
-    agent["enc_alg"] = enc_alg
-    agent["sign_alg"] = sign_alg
-
     # Ensure hash_alg is in accept_tpm_hash_alg list
     if (
         not hash_alg
@@ -118,6 +113,8 @@ def process_quote_response(
         )
         return failure
 
+    agent["hash_alg"] = hash_alg
+
     # Ensure enc_alg is in accept_tpm_encryption_algs list
     if not enc_alg or not algorithms.is_accepted(enc_alg, agent["accept_tpm_encryption_algs"]):
         logger.error("TPM Quote for agent %s is using an unaccepted encryption algorithm: %s", agent_id, enc_alg)
@@ -128,6 +125,8 @@ def process_quote_response(
         )
         return failure
 
+    agent["enc_alg"] = enc_alg
+
     # Ensure sign_alg is in accept_tpm_encryption_algs list
     if not sign_alg or not algorithms.is_accepted(sign_alg, agent["accept_tpm_signing_algs"]):
         logger.error("TPM Quote for agent %s is using an unaccepted signing algorithm: %s", agent_id, sign_alg)
@@ -137,6 +136,8 @@ def process_quote_response(
             False,
         )
         return failure
+
+    agent["sign_alg"] = sign_alg
 
     if ima_measurement_list_entry == 0:
         agentAttestState.reset_ima_attestation()
@@ -244,7 +245,7 @@ def prepare_get_quote(agent: Dict[str, Any]) -> Dict[str, Union[str, int]]:
     This method is part of the polling loop of the thread launched on Tenant POST.
     """
     agentAttestState = get_AgentAttestStates().get_by_agent_id(agent["agent_id"])
-    agent["nonce"] = TPM_Utilities.random_password(20)
+    agent["nonce"] = tpm_util.random_password(20)
 
     tpm_policy = ast.literal_eval(agent["tpm_policy"])
     params = {
@@ -256,8 +257,6 @@ def prepare_get_quote(agent: Dict[str, Any]) -> Dict[str, Union[str, int]]:
 
 
 def process_get_status(agent: VerfierMain) -> Dict[str, Any]:
-    agent_id = agent.agent_id
-
     has_mb_refstate = 0
     try:
         mb_refstate = json.loads(cast(str, agent.mb_refstate))
@@ -266,10 +265,10 @@ def process_get_status(agent: VerfierMain) -> Dict[str, Any]:
     except Exception as e:
         logger.warning(
             'Non-fatal problem ocurred while attempting to evaluate agent %s attribute "mb_refstate" (%s). Will just consider the value of this attribute as empty',
-            agent_id,
+            agent.agent_id,
             e.args,
         )
-        logger.debug('The contents of the agent %s attribute "mb_refstate" are %s', agent_id, agent.mb_refstate)
+        logger.debug('The contents of the agent %s attribute "mb_refstate" are %s', agent.agent_id, agent.mb_refstate)
 
     has_runtime_policy = 0
     if agent.ima_policy.generator and agent.ima_policy.generator > 1:

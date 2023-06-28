@@ -149,7 +149,7 @@ agent and registrar.
 
 You can install the services with the following command:
 
-`sudo ./services/install.sh`
+`sudo ./services/installer.sh`
 
 Once installed, you can run and inspect the services `keylime_verifier` and `keylime_registrar` via `systemctl`.
 The Rust agent repository also contains a systemd service file for the agent.
@@ -204,7 +204,7 @@ Please, see [TESTING.md](TESTING.md) for details.
 * See the HotCloud 2018 paper: [docs/old/hotcloud18.pdf](https://github.com/keylime/keylime/blob/master/docs/old/hotcloud18.pdf)
 * Details about Keylime REST API: [docs/old/keylime RESTful API.docx](https://github.com/keylime/keylime/raw/master/docs/old/keylime%20RESTful%20API.docx)
 * [Demo files](demo/) - Some pre-packaged demos to show off what Keylime can do.
-* [IMA stub service](ima_stub_service/) - Allows you to test IMA and Keylime on a machine without a TPM.  Service keeps emulated TPM synchronized with IMA.
+* [IMA stub service](https://github.com/keylime/rust-keylime/tree/master/keylime-ima-emulator) - Allows you to test IMA and Keylime on a machine without a TPM.  Service keeps emulated TPM synchronized with IMA.
 
 #### Errata from the ACSAC Paper
 

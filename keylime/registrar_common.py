@@ -3,15 +3,17 @@ import http.server
 import ipaddress
 import os
 import signal
+import socket
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from ipaddress import IPv6Address, ip_address
 from socketserver import ThreadingMixIn
-from typing import Any, Dict, Tuple, cast
+from typing import Any, Dict, Optional, Tuple, Union, cast
 
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm.exc import NoResultFound
+from sqlalchemy.orm.exc import NoResultFound  # pyright: ignore
 
 from keylime import api_version as keylime_api_version
 from keylime import cert_utils, config, crypto, json, keylime_logging, web_util
@@ -20,7 +22,7 @@ from keylime.da import record
 from keylime.db.keylime_db import DBEngineManager, SessionManager
 from keylime.db.registrar_db import RegistrarMain
 from keylime.tpm import tpm2_objects
-from keylime.tpm.tpm_main import tpm
+from keylime.tpm.tpm_main import Tpm
 
 logger = keylime_logging.init_logging("registrar")
 
@@ -40,7 +42,41 @@ except record.RecordManagementException as rme:
     sys.exit(1)
 
 
-class ProtectedHandler(BaseHTTPRequestHandler, SessionManager):
+class BaseHandler(BaseHTTPRequestHandler, SessionManager):
+    def _validate_input(
+        self, method: str, respond_on_agent_id_none: bool
+    ) -> Tuple[Optional[Dict[str, Union[str, None]]], Optional[str]]:
+        rest_params = web_util.get_restful_params(self.path)
+        if rest_params is None:
+            web_util.echo_json_response(self, 405, "Not Implemented: Use /agents/ interface")
+            return None, None
+
+        if not web_util.validate_api_version(self, cast(str, rest_params["api_version"]), logger):
+            return None, None
+
+        if "agents" not in rest_params:
+            web_util.echo_json_response(self, 400, "URI not supported")
+            logger.warning("%s agent returning 400 response. uri not supported: %s", method, self.path)
+            return None, None
+
+        agent_id = rest_params["agents"]
+
+        if agent_id is None:
+            if respond_on_agent_id_none:
+                web_util.echo_json_response(self, 400, "agent id not found in uri")
+                logger.warning("%s agent returning 400 response. agent id not found in uri %s", method, self.path)
+            return rest_params, None
+
+        # If the agent ID is not valid (wrong set of characters), just do nothing.
+        if not validators.valid_agent_id(agent_id):
+            web_util.echo_json_response(self, 400, "agent_id is not valid")
+            logger.error("%s received an invalid agent ID: %s", method, agent_id)
+            return None, None
+
+        return rest_params, agent_id
+
+
+class ProtectedHandler(BaseHandler):
     def do_HEAD(self) -> None:
         """HEAD not supported"""
         web_util.echo_json_response(self, 405, "HEAD not supported")
@@ -57,30 +93,12 @@ class ProtectedHandler(BaseHTTPRequestHandler, SessionManager):
         agent to be returned. If the agent_id is not found, a 404 response is returned.
         """
         session = SessionManager().make_session(engine)
-        rest_params = web_util.get_restful_params(self.path)
-        if rest_params is None:
-            web_util.echo_json_response(self, 405, "Not Implemented: Use /agents/ interface")
-            return
 
-        if not web_util.validate_api_version(self, cast(str, rest_params["api_version"]), logger):
+        rest_params, agent_id = self._validate_input("GET", False)
+        if not rest_params:
             return
-
-        if "agents" not in rest_params:
-            web_util.echo_json_response(self, 400, "uri not supported")
-            logger.warning("GET returning 400 response. uri not supported: %s", self.path)
-            return
-
-        agent_id = rest_params["agents"]
 
         if agent_id is not None:
-            # If the agent ID is not valid (wrong set of characters),
-            # just do nothing.
-            if not validators.valid_agent_id(agent_id):
-                web_util.echo_json_response(self, 400, "agent_id not not valid")
-                logger.error("GET received an invalid agent ID: %s", agent_id)
-                return
-
-            agent = None
             try:
                 agent = session.query(RegistrarMain).filter_by(agent_id=agent_id).first()
             except SQLAlchemyError as e:
@@ -107,7 +125,7 @@ class ProtectedHandler(BaseHTTPRequestHandler, SessionManager):
                 "regcount": agent.regcount,
             }
 
-            if agent.virtual:
+            if agent.virtual:  # pyright: ignore
                 response["provider_keys"] = agent.provider_keys
 
             web_util.echo_json_response(self, 200, "Success", response)
@@ -136,29 +154,12 @@ class ProtectedHandler(BaseHTTPRequestHandler, SessionManager):
         agents requests require a single agent_id parameter which identifies the agent to be deleted.
         """
         session = SessionManager().make_session(engine)
-        rest_params = web_util.get_restful_params(self.path)
-        if rest_params is None:
-            web_util.echo_json_response(self, 405, "Not Implemented: Use /agents/ interface")
-            return
 
-        if not web_util.validate_api_version(self, cast(str, rest_params["api_version"]), logger):
+        rest_params, agent_id = self._validate_input("DELETE", False)
+        if not rest_params:
             return
-
-        if "agents" not in rest_params:
-            web_util.echo_json_response(self, 400, "URI not supported")
-            logger.warning("DELETE agent returning 400 response. uri not supported: %s", self.path)
-            return
-
-        agent_id = rest_params["agents"]
 
         if agent_id is not None:
-            # If the agent ID is not valid (wrong set of characters),
-            # just do nothing.
-            if not validators.valid_agent_id(agent_id):
-                web_util.echo_json_response(self, 400, "agent_id not not valid")
-                logger.error("DELETE received an invalid agent ID: %s", agent_id)
-                return
-
             if session.query(RegistrarMain).filter_by(agent_id=agent_id).delete():
                 # send response
                 try:
@@ -179,7 +180,7 @@ class ProtectedHandler(BaseHTTPRequestHandler, SessionManager):
         return
 
 
-class UnprotectedHandler(BaseHTTPRequestHandler, SessionManager):
+class UnprotectedHandler(BaseHandler):
     def do_HEAD(self) -> None:
         """HEAD not supported"""
         web_util.echo_json_response(self, 405, "HEAD not supported")
@@ -210,6 +211,36 @@ class UnprotectedHandler(BaseHTTPRequestHandler, SessionManager):
 
         web_util.echo_json_response(self, 200, "Success", version_info)
 
+    @staticmethod
+    def get_network_params(
+        json_body: Dict[str, Any], agent_id: str
+    ) -> Tuple[Optional[str], Optional[int], Optional[str]]:
+        # Validate ip and port
+        ip = json_body.get("ip")
+        if ip is not None:
+            try:
+                ipaddress.ip_address(ip)
+            except ValueError:
+                logger.warning("Contact ip for agent %s is not a valid ip got: %s.", agent_id, ip)
+                ip = None
+
+        port = json_body.get("port")
+        if port is not None:
+            try:
+                port = int(port)
+                if port < 1 or port > 65535:
+                    logger.warning("Contact port for agent %s is not a number between 1 and got: %s.", agent_id, port)
+                    port = None
+            except ValueError:
+                logger.warning("Contact port for agent %s is not a valid number got: %s.", agent_id, port)
+                port = None
+
+        mtls_cert = json_body.get("mtls_cert")
+        if mtls_cert is None or mtls_cert == "disabled":
+            logger.warning("Agent %s did not send a mTLS certificate. Most operations will not work!", agent_id)
+
+        return ip, port, mtls_cert
+
     def do_POST(self) -> None:
         """This method handles the POST requests to add agents to the Registrar Server.
 
@@ -218,31 +249,9 @@ class UnprotectedHandler(BaseHTTPRequestHandler, SessionManager):
         block sent in the body with 2 entries: ek and aik.
         """
         session = SessionManager().make_session(engine)
-        rest_params = web_util.get_restful_params(self.path)
-        if rest_params is None:
-            web_util.echo_json_response(self, 405, "Not Implemented: Use /agents/ interface")
-            return
 
-        if not web_util.validate_api_version(self, cast(str, rest_params["api_version"]), logger):
-            return
-
-        if "agents" not in rest_params:
-            web_util.echo_json_response(self, 400, "uri not supported")
-            logger.warning("POST agent returning 400 response. uri not supported: %s", self.path)
-            return
-
-        agent_id = rest_params["agents"]
-
-        if agent_id is None:
-            web_util.echo_json_response(self, 400, "agent id not found in uri")
-            logger.warning("POST agent returning 400 response. agent id not found in uri %s", self.path)
-            return
-
-        # If the agent ID is not valid (wrong set of characters), just
-        # do nothing.
-        if not validators.valid_agent_id(agent_id):
-            web_util.echo_json_response(self, 400, "agent id not valid")
-            logger.error("POST received an invalid agent ID: %s", agent_id)
+        _, agent_id = self._validate_input("POST", True)
+        if not agent_id:
             return
 
         try:
@@ -257,8 +266,6 @@ class UnprotectedHandler(BaseHTTPRequestHandler, SessionManager):
 
             ekcert = json_body["ekcert"]
             aik_tpm = json_body["aik_tpm"]
-
-            initialize_tpm = tpm()
 
             if ekcert is None or ekcert == "emulator":
                 logger.warning("Agent %s did not submit an ekcert", agent_id)
@@ -291,17 +298,17 @@ class UnprotectedHandler(BaseHTTPRequestHandler, SessionManager):
                 return
 
             # try to encrypt the AIK
-            aik_enc = initialize_tpm.encryptAIK(
+            aik_enc = Tpm.encryptAIK(
                 agent_id,
                 base64.b64decode(ek_tpm),
                 base64.b64decode(aik_tpm),
             )
-            if aik_enc is not None:
-                (blob, key) = aik_enc
-            else:
+            if aik_enc is None:
                 logger.warning("Agent %s failed encrypting AIK", agent_id)
                 web_util.echo_json_response(self, 400, "Error: failed encrypting AK")
                 return
+
+            blob, key = aik_enc
 
             # special behavior if we've registered this uuid before
             regcount = 1
@@ -317,7 +324,7 @@ class UnprotectedHandler(BaseHTTPRequestHandler, SessionManager):
                 # keep track of how many ek-ekcerts have registered on this uuid
                 assert isinstance(agent.regcount, int)
                 regcount = agent.regcount
-                if agent.ek_tpm != ek_tpm or agent.ekcert != ekcert:
+                if agent.ek_tpm != ek_tpm or agent.ekcert != ekcert:  # pyright: ignore
                     logger.warning("WARNING: Overwriting previous registration for this UUID with new ek-ekcert pair!")
                     regcount += 1
 
@@ -329,49 +336,25 @@ class UnprotectedHandler(BaseHTTPRequestHandler, SessionManager):
                 except SQLAlchemyError as e:
                     logger.error("SQLAlchemy Error: %s", e)
                     raise
-            # Check for ip and port
-            contact_ip = json_body.get("ip", None)
-            contact_port = json_body.get("port", None)
 
-            # Validate ip and port
-            if contact_ip is not None:
-                try:
-                    # Use parser from the standard library instead of implementing our own
-                    ipaddress.ip_address(contact_ip)
-                except ValueError:
-                    logger.warning("Contact ip for agent %s is not a valid ip got: %s.", agent_id, contact_ip)
-                    contact_ip = None
-            if contact_port is not None:
-                try:
-                    contact_port = int(contact_port)
-                    if contact_port < 1 or contact_port > 65535:
-                        logger.warning(
-                            "Contact port for agent %s is not a number between 1 and got: %s.", agent_id, contact_port
-                        )
-                        contact_port = None
-                except ValueError:
-                    logger.warning("Contact port for agent %s is not a valid number got: %s.", agent_id, contact_port)
-                    contact_port = None
-
-            # Check for mTLS cert
-            mtls_cert = json_body.get("mtls_cert", None)
-            if mtls_cert is None or mtls_cert == "disabled":
-                logger.warning("Agent %s did not send a mTLS certificate. Most operations will not work!", agent_id)
+            # Check for ip and port and mTLS cert
+            contact_ip, contact_port, mtls_cert = UnprotectedHandler.get_network_params(json_body, agent_id)
 
             # Add values to database
-            d: Dict[str, Any] = {}
-            d["agent_id"] = agent_id
-            d["ek_tpm"] = ek_tpm
-            d["aik_tpm"] = aik_tpm
-            d["ekcert"] = ekcert
-            d["ip"] = contact_ip
-            d["mtls_cert"] = mtls_cert
-            d["port"] = contact_port
-            d["virtual"] = int(ekcert == "virtual")
-            d["active"] = int(False)
-            d["key"] = key
-            d["provider_keys"] = {}
-            d["regcount"] = regcount
+            d: Dict[str, Any] = {
+                "agent_id": agent_id,
+                "ek_tpm": ek_tpm,
+                "aik_tpm": aik_tpm,
+                "ekcert": ekcert,
+                "ip": contact_ip,
+                "mtls_cert": mtls_cert,
+                "port": contact_port,
+                "virtual": int(ekcert == "virtual"),
+                "active": int(False),
+                "key": key,
+                "provider_keys": {},
+                "regcount": regcount,
+            }
 
             try:
                 session.add(RegistrarMain(**d))
@@ -406,31 +389,9 @@ class UnprotectedHandler(BaseHTTPRequestHandler, SessionManager):
         will return errors.
         """
         session = SessionManager().make_session(engine)
-        rest_params = web_util.get_restful_params(self.path)
-        if rest_params is None:
-            web_util.echo_json_response(self, 405, "Not Implemented: Use /agents/ interface")
-            return
 
-        if not web_util.validate_api_version(self, cast(str, rest_params["api_version"]), logger):
-            return
-
-        if "agents" not in rest_params:
-            web_util.echo_json_response(self, 400, "uri not supported")
-            logger.warning("PUT agent returning 400 response. uri not supported: %s", self.path)
-            return
-
-        agent_id = rest_params["agents"]
-
-        if agent_id is None:
-            web_util.echo_json_response(self, 400, "agent id not found in uri")
-            logger.warning("PUT agent returning 400 response. agent id not found in uri %s", self.path)
-            return
-
-        # If the agent ID is not valid (wrong set of characters), just
-        # do nothing.
-        if not validators.valid_agent_id(agent_id):
-            web_util.echo_json_response(self, 400, "agent_id not not valid")
-            logger.error("PUT received an invalid agent ID: %s", agent_id)
+        _, agent_id = self._validate_input("PUT", True)
+        if not agent_id:
             return
 
         try:
@@ -493,6 +454,9 @@ class RegistrarServer(ThreadingMixIn, HTTPServer):
 
     def __init__(self, server_address: Tuple[str, int], RequestHandlerClass: Any) -> None:
         """Constructor overridden to provide ability to read file"""
+        bindaddr = server_address[0].strip()
+        if len(bindaddr) > 0 and isinstance(ip_address(bindaddr), IPv6Address):
+            self.address_family = socket.AF_INET6
         http.server.HTTPServer.__init__(self, server_address, RequestHandlerClass)
 
     def shutdown(self) -> None:

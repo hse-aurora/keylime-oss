@@ -8,11 +8,9 @@
 KEYLIME_GIT=https://github.com/keylime/keylime.git
 TPM2TSS_GIT=https://github.com/tpm2-software/tpm2-tss.git
 TPM2TOOLS_GIT=https://github.com/tpm2-software/tpm2-tools.git
-TPM2SIM_SRC=http://sourceforge.net/projects/ibmswtpm2/files/ibmtpm1119.tar.gz/download
 KEYLIME_VER="master"
-TPM4720_VER="master"
 TPM2TSS_VER="3.2.x"
-TPM2TOOLS_VER="5.1.X"
+TPM2TOOLS_VER="5.5"
 
 # Minimum version requirements
 MIN_PYTHON_VERSION="3.6.7"
@@ -146,6 +144,26 @@ case "$ID" in
         else
             NEED_BUILD_TOOLS=1
         fi
+    ;;
+
+    # Alibaba Cloud Linux
+    alinux)
+        case "${VERSION_ID}" in
+            3*)
+                echo "${ID} selected."
+                PACKAGE_MGR=$(command -v dnf)
+                PYTHON_PREIN="python3 python3-devel python3-setuptools git wget patch rust cargo"
+                PYTHON_DEPS="python3-pip gcc gcc-c++ openssl-devel swig python3-pyyaml python3-zmq python3-cryptography python3-tornado python3-requests python3-gpg yaml-cpp-devel procps-ng python3-psutil python3-lark-parser python3-alembic python3-setuptools"
+                if [ "$(uname -m)" = "x86_64" ]; then
+                     PYTHON_DEPS+=" efivar-libs"
+                fi
+                pip3 install setuptools_rust
+                TPM2_TOOLS_PKGS="tpm2-tools tpm2-tss"
+            ;;
+            *)
+                echo "Version ${VERSION_ID} of ${ID} not supported"
+                exit 1
+        esac
     ;;
 
     *)
@@ -355,6 +373,8 @@ else
     git clone $TPM2TOOLS_GIT tpm2-tools
     pushd tpm2-tools
     git checkout $TPM2TOOLS_VER
+    # cherry-pick tpm2-software/tpm2-tools@9735dc3 and tpm2-software/tpm2-tools@576a31b to cover parsing for most newer logs.
+    git cherry-pick -n 9735dc3 576a31b
     ./bootstrap
     if [[ -n $CENTOS7_TSS_FLAGS ]] ; then
         export SAPI_CFLAGS=' '

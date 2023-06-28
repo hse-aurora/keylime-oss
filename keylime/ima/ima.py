@@ -1,10 +1,9 @@
-import codecs
 import copy
 import enum
 import functools
 import hashlib
 import json
-from typing import Any, Dict, List, Optional, Pattern, Set, TextIO, Tuple, Type
+from typing import Any, Dict, List, Optional, Pattern, Tuple, Type
 
 import jsonschema
 
@@ -105,94 +104,6 @@ RUNTIME_POLICY_SCHEMA = {
 }
 
 
-class IMAMeasurementList:
-    """IMAMeasurementList models the IMA measurement lists's last known
-    two numbers of entries and filesizes
-    """
-
-    instance = None
-    entries: Set[Tuple[int, int]]
-
-    @staticmethod
-    def get_instance() -> "IMAMeasurementList":
-        """Return a singleton"""
-        if not IMAMeasurementList.instance:
-            IMAMeasurementList.instance = IMAMeasurementList()
-        return IMAMeasurementList.instance
-
-    def __init__(self) -> None:
-        """Constructor"""
-        self.entries = set()
-        self.reset()
-
-    def reset(self) -> None:
-        """Reset the variables"""
-        self.entries = set()
-
-    def update(self, num_entries: int, filesize: int) -> None:
-        """Update the number of entries and current filesize of the log."""
-        if len(self.entries) > 256:
-            for entry in self.entries:
-                self.entries.discard(entry)
-                break
-        self.entries.add((num_entries, filesize))
-
-    def find(self, nth_entry: int) -> Tuple[int, int]:
-        """Find the closest entry to the n-th entry and return its number
-        and filesize to seek to, return 0, 0 if nothing was found.
-        """
-        best = (0, 0)
-        for entry in self.entries:
-            if entry[0] > best[0] and entry[0] <= nth_entry:
-                best = entry
-        return best
-
-
-def read_measurement_list(ima_log_file: TextIO, nth_entry: int) -> Tuple[Optional[str], int, int]:
-    """Read the IMA measurement list starting from a given entry.
-    The entry may be of any value 0 <= entry <= entries_in_log where
-    entries_in_log + 1 indicates that the client wants to read the next entry
-    once available. If the entry is outside this range, the function will
-    automatically read from the 0-th entry.
-    This function returns the measurement list and the entry from where it
-    was read and the current number of entries in the file.
-    """
-    IMAML = IMAMeasurementList.get_instance()
-    ml = None
-
-    # Try to find the closest entry to the nth_entry
-    num_entries, filesize = IMAML.find(nth_entry)
-
-    if not ima_log_file:
-        IMAML.reset()
-        nth_entry = 0
-        logger.warning("IMA measurement list not available: %s", config.IMA_ML)
-    else:
-        ima_log_file.seek(filesize)
-        filedata = ima_log_file.read()
-        # filedata now corresponds to starting list at entry number 'IMAML.num_entries'
-        # find n-th entry and determine number of total entries in file now
-        offset = 0
-        while True:
-            try:
-                if nth_entry == num_entries:
-                    ml = filedata[offset:]
-                o = filedata.index("\n", offset)
-                offset = o + 1
-                num_entries += 1
-            except ValueError:
-                break
-        # IMAML.filesize corresponds to position for entry number 'IMAML.num_entries'
-        IMAML.update(num_entries, filesize + offset)
-
-        # Nothing found? User request beyond next-expected entry.
-        # Start over with entry 0. This cannot recurse again.
-        if ml is None:
-            return read_measurement_list(ima_log_file, 0)
-
-    return ml, nth_entry, num_entries
-
-
 def _validate_ima_ng(
     exclude_regex: Optional[Pattern[str]],
     runtime_policy: Optional[RuntimePolicyType],
@@ -212,18 +123,19 @@ def _validate_ima_ng(
             failure.add_event("not_in_allowlist", f"File not found in allowlist: {path.name}", True)
             return failure
 
-        if codecs.encode(digest.hash, "hex").decode("utf-8") not in accept_list:
+        hex_hash = digest.hash.hex()
+        if hex_hash not in accept_list:
             logger.warning(
                 "Hashes for file %s don't match %s not in %s",
                 path.name,
-                codecs.encode(digest.hash, "hex").decode("utf-8"),
-                runtime_policy,
+                hex_hash,
+                str(accept_list),
             )
             failure.add_event(
                 "runtime_policy_hash",
                 {
                     "message": "Hash not found in runtime policy",
-                    "got": codecs.encode(digest.hash, "hex").decode("utf-8"),
+                    "got": hex_hash,
                     "expected": accept_list,
                 },
                 True,
@@ -321,7 +233,7 @@ def _process_measurement_list(
     errors: Dict[Type[ast.Mode], int] = {}
     pcrval_bytes = b""
     if pcrval is not None:
-        pcrval_bytes = codecs.decode(pcrval.encode("utf-8"), "hex")
+        pcrval_bytes = bytes.fromhex(pcrval)
 
     if runtime_policy is not None:
         exclude_list = runtime_policy.get("excludes")
@@ -431,7 +343,7 @@ def _process_measurement_list(
         error_msg += ", ".join([f"{k.__name__ } {v}" for k, v in errors.items()])
         logger.error("%s.", error_msg)
 
-    return codecs.encode(running_hash, "hex").decode("utf-8"), failure
+    return running_hash.hex(), failure
 
 
 def process_measurement_list(
@@ -573,8 +485,13 @@ def verify_runtime_policy(
             code=400,
         )
 
+    # validate that the runtime_policy is proper JSON
+    try:
+        runtime_policy_json = json.loads(runtime_policy)
+    except Exception as error:
+        raise ImaValidationError(message="Runtime policy is not valid JSON!", code=400) from error
+
     # detect if runtime policy is DSSE
-    runtime_policy_json = json.loads(runtime_policy)
     if runtime_policy_json.get("payload"):
         if verify_sig:
             if not signing.verify_dsse_envelope(runtime_policy, runtime_policy_key):
@@ -583,14 +500,8 @@ def verify_runtime_policy(
         else:
             runtime_policy = dsse.b64dec(runtime_policy_json["payload"])
 
-    # validate that the runtime_policy is proper JSON
-    try:
-        lists = json.loads(runtime_policy)
-    except Exception as error:
-        raise ImaValidationError(message="Runtime policy is not valid JSON!", code=400) from error
-
     # Validate exclude list contains valid regular expressions
-    _, excl_err_msg = validators.valid_exclude_list(lists.get("exclude"))
+    _, excl_err_msg = validators.valid_exclude_list(runtime_policy_json.get("exclude"))
     if excl_err_msg:
         raise ImaValidationError(
             message=f"{excl_err_msg} Exclude list regex is misformatted. Please correct the issue and try again.",
