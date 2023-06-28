@@ -319,11 +319,6 @@ class UnprotectedHandler(BaseHandler):
             # verify AIK and attestation data with IAK if IAK and IDevID received
             aik_verified = False
             if idevid_received:
-                aik_enc = Tpm.encrypt_aik_with_ek(
-                    agent_id,
-                    base64.b64decode(ek_tpm),
-                    base64.b64decode(aik_tpm)
-                )
                 aik_verified = Tpm.verify_aik_with_iak(
                     agent_id,
                     base64.b64decode(aik_tpm),
@@ -331,16 +326,15 @@ class UnprotectedHandler(BaseHandler):
                     iak_attest,
                     iak_sign
                     )
-            else:
-                aik_enc = Tpm.encrypt_aik_with_ek(
-                    agent_id,
-                    base64.b64decode(ek_tpm),
-                    base64.b64decode(aik_tpm)
-                )
             if not aik_verified and idevid_received:
                 logger.warning("Agent %s failed to verify AIK with IAK", agent_id)
                 web_util.echo_json_response(self, 400, "Error: failed verifying AK with IAK")
                 return
+            aik_enc = Tpm.encrypt_aik_with_ek(
+                    agent_id,
+                    base64.b64decode(ek_tpm),
+                    base64.b64decode(aik_tpm)
+                )
             if aik_enc is None:
                 logger.warning("Agent %s failed encrypting AIK", agent_id)
                 web_util.echo_json_response(self, 400, "Error: failed encrypting AK")

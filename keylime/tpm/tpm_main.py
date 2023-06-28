@@ -120,7 +120,7 @@ class Tpm:
         except:
             logger.warning("Agent %s AIK verification failed", uuid)
             return False
-        if verifyretDict["code"] == 0:
+        if int(verifyretDict["code"]) == 0:
             logger.info("Agent %s AIK verified with IAK", uuid)
             return True
         return False
