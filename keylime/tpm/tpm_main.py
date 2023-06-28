@@ -1,5 +1,6 @@
 import base64
 import zlib
+import tempfile
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from cryptography.hazmat.primitives import serialization as crypto_serialization
