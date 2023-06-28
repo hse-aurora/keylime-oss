@@ -19,7 +19,7 @@ logger = keylime_logging.init_logging("tpm")
 
 class Tpm:
     @staticmethod
-    def encryptAIK(uuid: str, ek_tpm: bytes, aik_tpm: bytes) -> Optional[Tuple[bytes, str]]:
+    def encrypt_aik_with_ek(uuid: str, ek_tpm: bytes, aik_tpm: bytes) -> Optional[Tuple[bytes, str]]:
         if ek_tpm is None or aik_tpm is None:
             logger.error("Missing parameters for encryptAIK")
             return None
@@ -31,7 +31,7 @@ class Tpm:
             challenge_str = tpm_util.random_password(32)
             challenge = challenge_str.encode()
 
-            logger.info("Encrypting AIK for UUID %s", uuid)
+            logger.info("Encrypting AIK with EK for UUID %s", uuid)
 
             # read in the aes key
             key = base64.b64encode(challenge).decode("utf-8")
@@ -40,11 +40,88 @@ class Tpm:
             keyblob = base64.b64encode(credentialblob)
 
         except Exception as e:
-            logger.error("Error encrypting AIK: %s", str(e))
+            logger.error("Error encrypting AIK with EK: %s", str(e))
             logger.exception(e)
             raise
 
         return (keyblob, key)
+    
+    @staticmethod
+    def verify_aik_with_iak(uuid: str, aik_tpm: bytes, 
+            iak_tpm: bytes, iak_attest: bytes, iak_sign: bytes) -> bool:
+        
+        # check UUID in certify matches UUID registering
+        if iak_attest[44:(44+len(uuid))] != bytes(uuid, 'utf-8'):
+            logger.warning("Agent %s AIK verification failed, uuid does not match attest info", uuid)
+            return False
+
+        #check aik in certify matches aik being registered
+        if tpm2_objects.get_tpm2b_public_name(aik_tpm) != iak_attest[107:141].hex():
+            logger.warning(" Agent %s AIK verification failed, name of aik does not match attest info", uuid)
+            return False
+
+        # generate digest of attest info
+        attestd, attestpath = tempfile.mkstemp()
+        with open(attestpath, 'wb') as f:
+            f.write(iak_attest)
+        digestd, digestpath = tempfile.mkstemp()
+        command = [
+            "tpm2_hash",
+            "-C",
+            "e",
+            "-g",
+            "sha256",
+            "-o",
+            digestpath,
+            attestpath
+        ]
+        self.__run(command, lock=False)
+
+        # process iak pub key and import into tpm, get pub key context from tpm
+        iakpub = tpm2_objects.pubkey_from_tpm2b_public(iak_tpm)
+        iakd, iakpath = tempfile.mkstemp()
+        iakcond, iakcontext = tempfile.mkstemp()
+        with open(iakpath, 'wb') as f:
+            f.write(iakpub.public_bytes(crypto_serialization.Encoding.PEM, crypto_serialization.PublicFormat.SubjectPublicKeyInfo))
+        command = [
+            "tpm2_loadexternal",
+            "-C",
+            "e",
+            "-G",
+            "rsa",
+            "-u",
+            iakpath,
+            "-c",
+            iakcontext,
+        ]
+        self.__run(command, lock=False)
+
+        # get signature and ticket files, run verifysignature of signature on digest with iak pub context
+        # verification failure is tpm error that will return false
+        iak_sign = iak_sign.hex()
+        sigd, sigpath = tempfile.mkstemp()
+        with open(sigpath, 'wb') as f:
+            f.write(binascii.unhexlify(iak_sign))
+        ticketd, ticketpath = tempfile.mkstemp()
+        try:
+            command = [
+                "tpm2_verifysignature",
+                "-c",
+                iakcontext,
+                "-d",
+                digestpath,
+                "-s",
+                sigpath,
+                "-t",
+                ticketpath
+            ]
+            self.__run(command, lock=False)
+            logger.info("Agent %s AIK verified with IAK", uuid)
+            return True
+        except:
+            logger.warning("Agent %s AIK verification failed", uuid)
+            return False
+        return False
 
     @staticmethod
     def verify_ek(ekcert: bytes, tpm_cert_store: str) -> bool:
