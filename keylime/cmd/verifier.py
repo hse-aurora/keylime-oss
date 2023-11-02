@@ -1,6 +1,9 @@
-from keylime import cloud_verifier_tornado, config, keylime_logging
+from keylime import config, keylime_logging
+from keylime.web import VerifierServer
 from keylime.common.migrations import apply
 from keylime.mba import mba
+import asyncio
+import tornado.process
 
 logger = keylime_logging.init_logging("verifier")
 
@@ -12,7 +15,13 @@ def main() -> None:
 
     # Explicitly load and initialize measured boot components
     mba.load_imports()
-    cloud_verifier_tornado.main()
+
+    # TODO: Remove
+    # cloud_verifier_tornado.main()
+
+    server = VerifierServer()
+    tornado.process.fork_processes(0)
+    asyncio.run(server.start())
 
 
 if __name__ == "__main__":
