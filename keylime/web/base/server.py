@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 from functools import wraps
+from ssl import CERT_OPTIONAL
 import asyncio
 import tornado
+from keylime import config, web_util
 from keylime.web.base.route import Route
 from keylime.web.base.action_handler import ActionHandler
 
@@ -33,6 +35,13 @@ class Server(ABC):
     the ``start`` instance method::
     
         server = ExampleServer()
+        server.start()
+
+    To spawn multiple worker processes for handling requests, you can call Tornado's ``fork_processes`` function after
+    instantiating the server, but before starting it:
+
+        server = ExampleServer()
+        tornado.process.fork_processes(0)
         server.start()
 
     Decorators
@@ -93,8 +102,8 @@ class Server(ABC):
                     if route not in initial_routes:
                         # Define routes scoped to the API version specified by major_version
                         new_routes_list.extend([
-                            Route(route.method, f"/v{major_version}{route.pattern}", route.controller, route.action),
-                            Route(route.method, f"/v{major_version}.:minor{route.pattern}", route.controller, route.action)
+                            Route(route.method, f"/v{major_version}{route.pattern}", route.controller, route.action, route.allow_insecure),
+                            Route(route.method, f"/v{major_version}.:minor{route.pattern}", route.controller, route.action, route.allow_insecure)
                         ])
 
                 # Replace the Server instance's list of routes with a new list consisting of the routes which were
@@ -106,12 +115,39 @@ class Server(ABC):
             return version_scope_wrapper
         return version_scope_decorator
 
-    def __init__(self, host, port, max_upload_size=None):
-        self._host = host
-        self._port = port
-        self._max_upload_size = max_upload_size
+    def __init__(self, **options):
+        """Initialise server with provided configuration options or default values and bind to sockets for HTTP and/or
+        HTTPS connections. This does not start the server to start accepting requests (this is done by calling the
+        ``server.start()`` instance method).
 
-        # Initialise empty list of routes
+        If you wish to create multiple server processes, first instantiate a new server and then fork the process
+        before starting the server with `server.start()`.
+        """
+        # Set defaults for server options
+        self._host = "127.0.0.1"
+        self._http_port = 80
+        self._https_port = 443
+        self._max_upload_size = 104857600 # 100MiB
+        self._ssl_ctx = None
+
+        # Override defaults with values given by the implementing class
+        self._setup()
+
+        # If options are set by the caller, use these to override the defaults and those set by the implementing class
+        for opt in ["host", "http_port", "https_port", "max_upload_size", "ssl_ctx"]:
+            if opt in options:
+                setattr(f"_{opt}", options[opt])
+
+        if not self.host:
+            raise ValueError(f"server '{self.__class__.__name__}' cannot be initialised without a value for 'host'")
+        
+        if not self.http_port or (not self.https_port or not self.ssl_ctx):
+            raise ValueError(
+                f"server '{self.__class__.__name__}' cannot be initialised without either 'http_port' or 'https_port'"
+                f"and 'ssl_ctx'"
+            )
+        
+        # Initialise empty list for routes
         self.__routes = []
 
         # Add routes defined by the implementing class
@@ -122,75 +158,100 @@ class Server(ABC):
             (r".*", ActionHandler, {"server": self})
         ])
 
-        # Bind socket to user-configured port and address
-        self.__tornado_sockets = tornado.netutil.bind_sockets(int(self.port), address=self.host)
+        # Bind socket for HTTP connections
+        self.__tornado_http_sockets = tornado.netutil.bind_sockets(int(self.http_port), address=self.host)
 
-        # TODO: Evaluate init_mtls function:
-        # self.__ssl_ctx = web_util.init_mtls("verifier", logger=logger)
-        self.__ssl_ctx = None
+        # Bind socket for HTTPS connections
+        self.__tornado_https_sockets = tornado.netutil.bind_sockets(int(self.https_port), address=self.host)
 
     async def start(self):
-        """Instantiates and starts the HTTP server.
+        """Instantiates and starts the server (with one Tornado HTTPServer instance to handle HTTP connections 
+        and another to handle HTTPS connections).
 
         This should be done once per process. When new processes are created by forking, this method
         should be called after the fork.
         """
 
-        self.__tornado_server = tornado.httpserver.HTTPServer(
+        self.__tornado_http_server = tornado.httpserver.HTTPServer(
             self.__tornado_app,
-            ssl_options=self.__ssl_ctx,
+            ssl_options=None,
             max_buffer_size=self.max_upload_size
         )
 
-        self.__tornado_server.add_sockets(self.__tornado_sockets)
+        self.__tornado_https_server = tornado.httpserver.HTTPServer(
+            self.__tornado_app,
+            ssl_options=self.ssl_ctx,
+            max_buffer_size=self.max_upload_size
+        )
+
+        self.__tornado_http_server.add_sockets(self.__tornado_http_sockets)
+        self.__tornado_https_server.add_sockets(self.__tornado_https_sockets)
 
         await asyncio.Event().wait()
 
-    @abstractmethod
-    def _routes(self):
+    def _setup(self):
+        """Defines values to use in place of the defaults for the various server options. It is suggested that this is
+        overriden by the implementing class."""
         pass
 
-    def _get(self, pattern, controller, action):
+    @abstractmethod
+    def _routes(self):
+        """Defines the routes accepted the server. Must be overridden by the implementing class and include one 
+        or more calls to the ``_get``, ``_head``, ``_post``, ``_put``, ``_patch``, ``_delete`` and/or ``_options`` 
+        helper methods.
+        """
+        pass
+
+    def _use_config(self, component):
+        """Sets server options to values found in the config."""
+        self._host = config.get(component, "ip")
+        self._http_port = config.getint(component, "port", fallback=0)
+        self._https_port = config.getint(component, "tls_port", fallback=0)
+        self._max_upload_size = config.getint(component, "max_upload_size", fallback=104857600)
+        self._ssl_ctx = web_util.init_mtls(component)
+        self._ssl_ctx.verify_mode = CERT_OPTIONAL
+
+    def _get(self, pattern, controller, action, allow_insecure=False):
         """Creates a new route to handle incoming GET requests issued for paths which match the given
         pattern. Must be called from a Server subclass's ``self._routes`` method.
         """
-        self.__routes.append(Route("get", pattern, controller, action))
+        self.__routes.append(Route("get", pattern, controller, action, allow_insecure))
 
-    def _head(self, pattern, controller, action):
+    def _head(self, pattern, controller, action, allow_insecure=False):
         """Creates a new route to handle incoming HEAD requests issued for paths which match the given
         pattern. Must be called from a Server subclass's ``self._routes`` method.
         """
-        self.__routes.append(Route("head", pattern, controller, action))
+        self.__routes.append(Route("head", pattern, controller, action, allow_insecure))
 
-    def _post(self, pattern, controller, action):
+    def _post(self, pattern, controller, action, allow_insecure=False):
         """Creates a new route to handle incoming POST requests issued for paths which match the given
         pattern. Must be called from a Server subclass's ``self._routes`` method.
         """
-        self.__routes.append(Route("post", pattern, controller, action))
+        self.__routes.append(Route("post", pattern, controller, action, allow_insecure))
 
-    def _put(self, pattern, controller, action):
+    def _put(self, pattern, controller, action, allow_insecure=False):
         """Creates a new route to handle incoming PUT requests issued for paths which match the given
         pattern. Must be called from a Server subclass's ``self._routes`` method.
         """
-        self.__routes.append(Route("put", pattern, controller, action))
+        self.__routes.append(Route("put", pattern, controller, action, allow_insecure))
 
-    def _patch(self, pattern, controller, action):
+    def _patch(self, pattern, controller, action, allow_insecure=False):
         """Creates a new route to handle incoming PATCH requests issued for paths which match the given
         pattern. Must be called from a Server subclass's ``self._routes`` method.
         """
-        self.__routes.append(Route("patch", pattern, controller, action))
+        self.__routes.append(Route("patch", pattern, controller, action, allow_insecure))
 
-    def _delete(self, pattern, controller, action):
+    def _delete(self, pattern, controller, action, allow_insecure=False):
         """Creates a new route to handle incoming DELETE requests issued for paths which match the given
         pattern. Must be called from a Server subclass's ``self._routes`` method.
         """
-        self.__routes.append(Route("delete", pattern, controller, action))
+        self.__routes.append(Route("delete", pattern, controller, action, allow_insecure))
 
-    def _options(self, pattern, controller, action):
+    def _options(self, pattern, controller, action, allow_insecure=False):
         """Creates a new route to handle incoming OPTIONS requests issued for paths which match the given
         pattern. Must be called from a Server subclass's ``self._routes`` method.
         """
-        self.__routes.append(Route("options", pattern, controller, action))
+        self.__routes.append(Route("options", pattern, controller, action, allow_insecure))
 
     def first_matching_route(self, method, path):
         """Gets the highest-priority route which matches the given ``method`` and ``path``.
@@ -206,8 +267,12 @@ class Server(ABC):
             return None
 
     @property
-    def port(self):
-        return self._port
+    def http_port(self):
+        return self._http_port
+    
+    @property
+    def https_port(self):
+        return self._https_port
 
     @property
     def host(self):
@@ -216,6 +281,10 @@ class Server(ABC):
     @property
     def max_upload_size(self):
         return self._max_upload_size
+    
+    @property
+    def ssl_ctx(self):
+        return self._ssl_ctx
 
     @property
     def routes(self):

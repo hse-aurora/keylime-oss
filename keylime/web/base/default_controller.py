@@ -7,3 +7,6 @@ class DefaultController(Controller):
 
     def method_not_allowed(self, **params):
         self.send_response(405, "Method Not Allowed")
+
+    def https_required(self, **params):
+        self.send_response(400, "Bad Request")

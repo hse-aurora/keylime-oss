@@ -113,7 +113,7 @@ class Route:
 
         return segments
 
-    def __init__(self, method, pattern, controller, action):
+    def __init__(self, method, pattern, controller, action, allow_insecure=False):
         """Instantiates a newly created route with the given method, pattern, controller and action. Typically, this 
         should be done by using the helper methods in the ``Server`` abstract base class.
 
@@ -121,6 +121,7 @@ class Route:
         :param pattern: The pattern which the route will match against a given path
         :param controller: A class which inherits from ``Controller`` and contains the actions for this route
         :param action: The name of an instance method in the controller which will be called on a matching request
+        :param allow_insecure: Whether this route should accept requests made over insecure HTTP (default: ``False``)
 
         :raises: :class:`TypeError`: An argument is of an incorrect type
         :raises: :class:`InvalidMethod`: The given HTTP method is not one accepted by the Routes class
@@ -153,6 +154,7 @@ class Route:
         self._method = method
         self._controller = controller
         self._action = action
+        self._allow_insecure = bool(allow_insecure)
 
         try:
             self._parse_pattern(pattern)
@@ -276,7 +278,6 @@ class Route:
         :param path: The path to check against the route pattern
 
         :raises: :class:`InvalidPathOrPattern`: The given path is invalid
-        :raises: :class:`PatternMismatch`: The given path does not match route's pattern
 
         :returns: ``True`` if the path matches the route pattern, ``False`` otherwise
         """
@@ -297,10 +298,11 @@ class Route:
 
         :raises: :class:`InvalidMethod`: The given method is invalid
         :raises: :class:`InvalidPathOrPattern`: The given path is invalid
-        :raises: :class:`PatternMismatch`: The given path does not match route's pattern
 
         :returns: ``True`` if the method and path both match the route, ``False`` otherwise
         """
+        method = method.lower()
+
         if method not in Route.ALLOWABLE_METHODS:
             raise InvalidMethod(f"method '{method}' is not an allowable HTTP method")
         
@@ -368,3 +370,7 @@ class Route:
     @property
     def action(self):
         return self._action
+
+    @property
+    def allow_insecure(self):
+        return self._allow_insecure

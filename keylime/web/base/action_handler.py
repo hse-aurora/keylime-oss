@@ -23,17 +23,14 @@ class ActionHandler(RequestHandler):
         self._controller = DefaultController(self)
         self._finished = False
 
-    def prepare(self):
-        method = self.request.method.lower()
-        path = self.request.path
-        
+    def prepare(self):        
         # Find highest-priority route which matches the request
-        route = self.server.first_matching_route(method, path)
+        route = self.server.first_matching_route(self.request.method, self.request.path)
 
         # Handle situations where a matching route does not exist
         if not route:
             # Check if any route with that path exists
-            route_with_path = self.server.first_matching_route(None, path)
+            route_with_path = self.server.first_matching_route(None, self.request.path)
 
             if route_with_path:
                 self.controller.method_not_allowed()
@@ -41,6 +38,10 @@ class ActionHandler(RequestHandler):
                 self.controller.not_found()
                 
             return
+
+        # Handle situation where HTTP is used to access an HTTPS-only route
+        if self.request.protocol == "http" and not route.allow_insecure:
+            self.controller.https_required()
 
         # Save found route in object attribute
         self._matching_route = route

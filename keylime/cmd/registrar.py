@@ -39,13 +39,8 @@ def main() -> None:
     # Prepare to use the registrar database
     db_manager.make_engine("registrar")
 
-    # Get config values needed to start the HTTP server
-    host = config.get("registrar", "ip")
-    port = config.get("registrar", "port")
-    max_upload_size = config.getint("registrar", "max_upload_size", None, 0)
-
     # Start HTTP server
-    server = RegistrarServer(host, port, max_upload_size)
+    server = RegistrarServer()
     tornado.process.fork_processes(0)
     asyncio.run(server.start())
 
