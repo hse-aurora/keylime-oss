@@ -18,7 +18,7 @@ class RegistrarAgent(PersistableModel):
         # The endorsement key (EK) of the TPM
         cls._field("ek_tpm", String(500))
         # The endorsement key (EK) certificate used to verify the TPM as genuine
-        cls._field("ekcert", String(2048))
+        cls._field("ekcert", String(2048), nullable=True)
         # The attestation key (AK) used by Keylime to prepare TPM quotes
         cls._field("aik_tpm", String(500))
         # The initial attestation key (IAK) used when registering with a DevID

@@ -23,3 +23,5 @@ class RegistrarServer(Server):
         # Routes which are kept for backwards compatibility but do not adhere to RFC 9110 semantics
         self._post("/agents/:agent_id", AgentsController, "create", allow_insecure=True)
         self._put("/agents/:agent_id/activate", AgentsController, "activate", allow_insecure=True)
+        # Instead of the above documented activation endpoint, the agent currently uses the one below to activate itself
+        self._put("/agents/:agent_id", AgentsController, "activate", allow_insecure=True)
