@@ -18,7 +18,7 @@ class RegistrarAgent(PersistableModel):
         # The endorsement key (EK) of the TPM
         cls._field("ek_tpm", String(500))
         # The endorsement key (EK) certificate used to verify the TPM as genuine
-        cls._field("ekcert", String(2048), nullable=True)
+        cls._field("ekcert", Text, nullable=True)
         # The attestation key (AK) used by Keylime to prepare TPM quotes
         cls._field("aik_tpm", String(500))
         # The initial attestation key (IAK) used when registering with a DevID
@@ -27,7 +27,7 @@ class RegistrarAgent(PersistableModel):
         cls._field("idevid_tpm", String(500))
         # The HMAC key used to verify the response produced by TPM2_ActivateCredential to bind the AK to the EK
         cls._field("key", String(45))
-        # Indicates that the AK has successfully been bound to the EK [[[or IAK]]]
+        # Indicates that the AK has successfully been bound to the EK
         cls._field("active", Boolean)
         # Indicates that the agent is running in a VM without an EKcert
         cls._field("virtual", Boolean)
@@ -35,7 +35,7 @@ class RegistrarAgent(PersistableModel):
         # The details used to establish connections to the agent when operating in pull mode
         cls._field("ip", String(15), nullable=True)
         cls._field("port", Integer, nullable=True)
-        cls._field("mtls_cert", String(2048), nullable=True)
+        cls._field("mtls_cert", Text, nullable=True)
 
         # The number of times the agent has registered over its lifetime
         cls._field("regcount", Integer)

@@ -1,6 +1,6 @@
 from keylime import config, keylime_logging
 from keylime.web import RegistrarServer
-from keylime.models.base import db_manager
+from keylime.models import db_manager
 from keylime.common.migrations import apply
 import asyncio
 import tornado.process

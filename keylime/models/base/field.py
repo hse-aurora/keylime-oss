@@ -23,8 +23,8 @@ class ModelField:
         
         if not self.python_type and not isinstance(type, PickleType):
             raise FieldDefinitionInvalid(
-                f"field '{name}' cannot be defined with type '{type}' as this is not a SQLAlchemy datatype "
-                f"with a defined '{type}.python_type' nor a SQLAlchemy 'PickleType'"
+                f"field '{name}' cannot be defined with type '{type.__class__.__name__}' as this is not a SQLAlchemy "
+                f"datatype with a defined '{type.__class__.__name__}.python_type' nor a SQLAlchemy 'PickleType'"
             )
 
     def __get__(self, obj, objtype=None):
