@@ -154,7 +154,7 @@ class Server(ABC):
         # If options are set by the caller, use these to override the defaults and those set by the implementing class
         for opt in ["host", "http_port", "https_port", "max_upload_size", "ssl_ctx"]:
             if opt in options:
-                setattr(f"_{opt}", options[opt])
+                setattr(self, f"_{opt}", options[opt])
 
         if not self.host:
             raise ValueError(f"server '{self.__class__.__name__}' cannot be initialised without a value for 'host'")
