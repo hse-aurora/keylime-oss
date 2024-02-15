@@ -104,7 +104,7 @@ def obj_test(**field_tests: typing.Callable[[typing.Any], bool]) -> typing.Calla
 class AcceptAll(Test):
     """Every value passes this test"""
 
-    def why_not(self, _: Globals, subject: Data) -> str:
+    def why_not(self, globs: Globals, subject: Data) -> str:
         return ""
 
 
@@ -117,7 +117,7 @@ class RejectAll(Test):
             raise Exception(f"the truth value of {why!r} is false")
         self.why = why
 
-    def why_not(self, _: Globals, subject: Data) -> str:
+    def why_not(self, globs: Globals, subject: Data) -> str:
         return self.why
 
 
@@ -361,7 +361,7 @@ class IntEqual(Test):
         type_test(int)(expected)
         self.expected = expected
 
-    def why_not(self, _: Globals, subject: Data) -> str:
+    def why_not(self, globs: Globals, subject: Data) -> str:
         if not isinstance(subject, int):
             return "is not a int"
         if subject == self.expected:
@@ -377,7 +377,7 @@ class StringEqual(Test):
         type_test(str)(expected)
         self.expected = expected
 
-    def why_not(self, _: Globals, subject: Data) -> str:
+    def why_not(self, globs: Globals, subject: Data) -> str:
         if not isinstance(subject, str):
             return "is not a str"
         if subject == self.expected:
@@ -392,7 +392,7 @@ class RegExp(Test):
         super().__init__()
         self.regexp = re.compile(pattern, flags)
 
-    def why_not(self, _: Globals, subject: Data) -> str:
+    def why_not(self, globs: Globals, subject: Data) -> str:
         if not isinstance(subject, str):
             return "is not a str"
         if self.regexp.fullmatch(subject):
@@ -422,7 +422,7 @@ class DigestsTest(Test):
                 else:
                     self.good_digests[alg] = {hash_val}
 
-    def why_not(self, _: Globals, subject: Data) -> str:
+    def why_not(self, globs: Globals, subject: Data) -> str:
         if not isinstance(subject, dict):
             return "is not a dict"
         if "Digests" not in subject:
@@ -457,7 +457,7 @@ class DigestTest(DigestsTest):
         super().__init__([good_digest])
 
 
-StrOrRE = typing.Union[str, typing.Pattern]
+StrOrRE = typing.Union[str, typing.Pattern[str]]
 
 
 class VariableTest(Test):
@@ -549,6 +549,19 @@ class KeySubset(IterateTest):
                 FieldTest("Keys", IterateTest(SignatureSetMember(keys))),
             )
         )
+
+
+class KeySubsetMulti(IterateTest):
+    def __init__(self, sig_types: typing.List[str], keys: typing.Iterable[typing.Mapping[str, str]]):
+        tests = [
+            And(
+                FieldTest("SignatureType", StringEqual(sig_type)),
+                FieldTest("Keys", IterateTest(SignatureSetMember(keys))),
+            )
+            for sig_type in sig_types
+        ]
+
+        super().__init__(Or(*tests))
 
 
 class FieldsMismatchError(Exception):
@@ -657,6 +670,7 @@ class EvEfiActionTest(Test):
     """Test for valid EV_EFI_ACTION entry values"""
 
     _expected_strings = {
+        1: ["Entering ROM Based Setup"],
         4: ["Calling EFI Application from Boot Option", "Returning from EFI Application from Boot Option"],
         5: [
             "Exit Boot Services Invocation",
