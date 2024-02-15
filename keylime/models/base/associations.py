@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from keylime.models.base.model import Model
 
+
 class ModelAssociation:
     def __init__(self, name, other_model, inverse_of=None):
         self._name = name
@@ -15,28 +16,29 @@ class ModelAssociation:
             return self
 
         return self.get_record_set(record)
-    
+
     def __delete__(self, record):
         self.get_record_set(record).clear()
-    
+
     def get_record_set(self, record):
         if not hasattr(record, self._private_member):
             setattr(record, self._private_member, AssociatedRecordSet(record, self))
 
         return getattr(record, self._private_member)
-    
+
     @property
     def name(self):
         return self._name
-    
+
     @property
     def other_model(self):
         return self._other_model
-    
+
     @property
     def inverse_of(self):
         return self._inverse_of
-    
+
+
 class GenericToOneAssociation(ModelAssociation):
     def __get__(self, obj, objtype=None):
         if obj is None:
@@ -45,7 +47,7 @@ class GenericToOneAssociation(ModelAssociation):
         record_set = self.get_record_set(obj)
 
         if len(record_set) == 1:
-            (record, ) = record_set
+            (record,) = record_set
             return record
         else:
             return None
@@ -56,21 +58,26 @@ class GenericToOneAssociation(ModelAssociation):
                 f"association '{self.name}' was given a value of type '{other_record.__class__.__name__}' which cannot "
                 f"be converted to '{self.other_model.__name__}' as required by the '{record.__class__.__name__}' model"
             )
-        
+
         record_set = self.get_record_set(record)
         record_set.clear()
         record_set.add(other_record)
 
+
 class GenericToManyAssociation(ModelAssociation):
     pass
-    
+
+
 class DatabasePersistenceMixin:
     if TYPE_CHECKING:
-        @property
-        def name(self) -> str: ...
 
         @property
-        def other_model(self) -> 'Model': ...
+        def name(self) -> str:
+            ...
+
+        @property
+        def other_model(self) -> "Model":
+            ...
 
     def __init__(self, name, other_model, foreign_key=None, preload=True, *args, **kwargs):
         self._foreign_key = foreign_key
@@ -95,11 +102,11 @@ class DatabasePersistenceMixin:
             (foreign_key,) = self.other_model.primary_key
             self._foreign_key = foreign_key
 
-            # TODO: This implementation should be moved into HasOneAssociation and HasManyAssociation with a 
+            # TODO: This implementation should be moved into HasOneAssociation and HasManyAssociation with a
             # different implementation added for BelongsToAssociation
 
         return self._foreign_key
-    
+
     @property
     def foreign_key_type(self):
         foreign_key_info = self.other_model.fields.get(self.foreign_key)
@@ -109,7 +116,7 @@ class DatabasePersistenceMixin:
                 f"the foreign_key '{self.foreign_key}' for database-backed association '{self.name}' does not "
                 f"correspond to an field defined by the associated model '{self.other_model}'"
             )
-        
+
         self._foreign_key_type = foreign_key_info.type
 
     @property
@@ -126,7 +133,7 @@ class BelongsToAssociation(DatabasePersistenceMixin, GenericToOneAssociation):
         (other_model_id_field,) = other_record.__class__.primary_key
         other_record_id = getattr(other_record, other_model_id_field)
 
-        # If the associated record is identifiable by an field with a name as specified by self.foreign_key, 
+        # If the associated record is identifiable by an field with a name as specified by self.foreign_key,
         # modify the parent record (which contains the association) to contain the id of the associated record
         if other_record_id:
             # # Add the id field to the parent record if it does not already exist
@@ -145,14 +152,18 @@ class BelongsToAssociation(DatabasePersistenceMixin, GenericToOneAssociation):
     def nullable(self):
         return self._nullable
 
+
 class HasOneAssociation(DatabasePersistenceMixin, GenericToOneAssociation):
     pass
+
 
 class HasManyAssociation(DatabasePersistenceMixin, GenericToManyAssociation):
     pass
 
+
 # TODO: Replace HasOneAssociation and HasManyAssociation with a single ReferencedByAssociation
 # and rename BelongsToAssociation as ReferencesAssociation
+
 
 class AssociatedRecordSet(set):
     def __init__(self, parent_record, association, *args, **kwargs):
@@ -167,7 +178,7 @@ class AssociatedRecordSet(set):
                 f"value of type '{record.__class__.__name__}' cannot be added to AssociatedRecordSet of type"
                 f"'{self.model.__name__}'"
             )
-        
+
         # If the caller has indicated that the inverse association should be populated and the association does have
         # an inverse association defined, back-populate the inverse association by creating a reference to the
         # association's parent record in the record being added to the set
@@ -193,7 +204,7 @@ class AssociatedRecordSet(set):
     @property
     def association(self):
         return self._association
-    
+
     @property
     def model(self):
         return self.association.other_model
@@ -202,17 +213,22 @@ class AssociatedRecordSet(set):
     def loaded(self):
         return self.loaded
 
+
 class ModelAssociationError(Exception):
     pass
+
 
 class AssociationDefinitionInvalid(ModelAssociationError):
     pass
 
+
 class AssociationValueInvalid(ModelAssociationError):
     pass
 
+
 class AssociationNonNullable(AssociationValueInvalid):
     pass
+
 
 class AssociationTypeMismatch(AssociationValueInvalid):
     pass

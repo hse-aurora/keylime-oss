@@ -1,15 +1,16 @@
 import base64
+
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from keylime.models.base import *
-from keylime import crypto
-from keylime import cert_utils
-from keylime.tpm import tpm2_objects
-from keylime.tpm.tpm_main import Tpm
+
+from keylime import cert_utils, crypto
 from keylime.db.registrar_db import JSONPickleType
 from keylime.json import JSONPickler
+from keylime.models.base import *
+from keylime.tpm import tpm2_objects
+from keylime.tpm.tpm_main import Tpm
+
 
 class RegistrarAgent(PersistableModel):
-
     @classmethod
     def _schema(cls):
         cls._persist_as("registrarmain")
@@ -60,7 +61,7 @@ class RegistrarAgent(PersistableModel):
         except:
             self._add_error("ekcert", "must be a valid binary X.509 certificate encoded in Base64")
             return
-        
+
         if not isinstance(ek_pub, (rsa.RSAPublicKey, ec.EllipticCurvePublicKey)):
             self._add_error("ekcert", "must contain a valid RSA or EC public key")
             return
@@ -73,16 +74,16 @@ class RegistrarAgent(PersistableModel):
         return True
 
     def _prepare_status_flags(self):
-        self.virtual = (self.ekcert == "virtual")
+        self.virtual = self.ekcert == "virtual"
 
         if ("ek_tpm", "ekcert", "aik_tpm", "iak_tpm", "idevid_tpm") in self.changes:
             self.active = False
 
     def update(self, data):
         # Bind key-value pairs ('data') to those fields which are meant to be externally changeable
-        self.cast_changes(data, [
-            "agent_id", "ek_tpm", "ekcert", "aik_tpm", "iak_tpm", "idevid_tpm", "ip", "port", "mtls_cert"
-        ])
+        self.cast_changes(
+            data, ["agent_id", "ek_tpm", "ekcert", "aik_tpm", "iak_tpm", "idevid_tpm", "ip", "port", "mtls_cert"]
+        )
 
         # Extract public EK from EK cert if possible
         self._prepare_ek()
@@ -90,7 +91,7 @@ class RegistrarAgent(PersistableModel):
         self._prepare_iak_idevid()
         # Determine and set 'virtual' and 'active' flags
         self._prepare_status_flags()
-        
+
         # Validate values
         self.validate_required(["ek_tpm", "aik_tpm"])
         self.validate_base64(["ek_tpm", "ekcert", "aik_tpm", "iak_tpm", "idevid_tpm"])
@@ -105,7 +106,7 @@ class RegistrarAgent(PersistableModel):
             if not result:
                 self._add_error("ek_tpm", "is not a valid TPM public key")
                 return None
-            
+
         except ValueError:
             self._add_error("aik_tpm", "is not a valid TPM public key")
             return None
@@ -113,20 +114,19 @@ class RegistrarAgent(PersistableModel):
         (challenge, key) = result
         self.change("key", key)
         return challenge.decode("utf-8")
-    
+
     def verify_ak_response(self, response):
         expected_response = crypto.do_hmac(self.key.encode(), self.agent_id)
 
-        result = (response == expected_response)
+        result = response == expected_response
 
         self.change("active", result)
         return result
 
-
     def render(self, only=None):
         if not only:
             only = ["ek_tpm", "ekcert", "aik_tpm", "mtls_cert", "ip", "port", "regcount"]
-            
+
             if self.virtual:
                 only.append("provider_keys")
 

@@ -1,6 +1,9 @@
-from sqlalchemy.types import TypeEngine, PickleType
 from inspect import isclass
+
+from sqlalchemy.types import PickleType, TypeEngine
+
 from keylime.models.base.errors import FieldDefinitionInvalid
+
 
 class ModelField:
     _name: str
@@ -20,7 +23,7 @@ class ModelField:
                 f"field '{name}' cannot be defined with type '{type}' as this is not a SQLAlchemy datatype "
                 f"inheriting from 'sqlalchemy.types.TypeEngine'"
             )
-        
+
         if not self.python_type and not isinstance(type, PickleType):
             raise FieldDefinitionInvalid(
                 f"field '{name}' cannot be defined with type '{type.__class__.__name__}' as this is not a SQLAlchemy "
@@ -30,9 +33,9 @@ class ModelField:
     def __get__(self, obj, objtype=None):
         if obj is None:
             return self
-        
+
         return obj.values.get(self._name)
-        
+
     def __set__(self, obj, value):
         obj.change(self._name, value)
 
@@ -46,11 +49,11 @@ class ModelField:
     @property
     def type(self):
         return self._type
-    
+
     @property
     def nullable(self):
         return self._nullable
-    
+
     @property
     def python_type(self):
         try:

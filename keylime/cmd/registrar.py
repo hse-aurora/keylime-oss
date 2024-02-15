@@ -1,12 +1,15 @@
-from keylime import config, keylime_logging
-from keylime.web import RegistrarServer
-from keylime.models import db_manager
-from keylime.common.migrations import apply
 import asyncio
-import tornado.process
+
 import cryptography
+import tornado.process
+
+from keylime import config, keylime_logging
+from keylime.common.migrations import apply
+from keylime.models import db_manager
+from keylime.web import RegistrarServer
 
 logger = keylime_logging.init_logging("registrar")
+
 
 def _check_devid_requirements():
     """Checks that the cryptography package is the version needed for DevID support (>= 38). Exits if this requirement
@@ -16,16 +19,15 @@ def _check_devid_requirements():
 
     if int(cryptography.__version__.split(".", maxsplit=1)[0]) < 38:
         if tpm_identity == "iak_idevid":
-            logger.error(
-                f"DevID is REQUIRED in config ('tpm_identity = {tpm_identity}') but cryptography version < 38"
-            )
+            logger.error(f"DevID is REQUIRED in config ('tpm_identity = {tpm_identity}') but cryptography version < 38")
             exit(1)
-        
+
         if tpm_identity in ("default", "ek_cert_or_iak_idevid"):
             logger.info(
                 f"DevID is enabled in config ('tpm_identity = {tpm_identity}') but cryptography version < 38, "
                 f"so only the EK will be used for device registration"
             )
+
 
 def main() -> None:
     config.check_version("registrar", logger=logger)

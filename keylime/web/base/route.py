@@ -1,12 +1,14 @@
 import re
+
 from keylime.web.base.controller import Controller
 from keylime.web.base.errors import *
+
 
 class Route:
     """A route represents a single unit of routing logic by which a set of similar incoming requests can all be directed
     to a specific action on a controller to apply specific processing logic unique to that set of requests.
 
-    Requests are matched against the HTTP method and URI path pattern defined by the route. Matching requests are then 
+    Requests are matched against the HTTP method and URI path pattern defined by the route. Matching requests are then
     directed to be handled by a specific controller and action.
 
     This class implements template-based routing and, in the process, codifies the syntax of path patterns, provides
@@ -28,7 +30,7 @@ class Route:
     as the first parameter to the ``get`` method. Matching requests will be handled by the ``show`` instance method
     defined in the ``AgentsController`` class. The  ``AgentsController`` class must inherit from ``Controller``.
 
-    Helpers for the other HTTP methods also exist. The full list is as follows: ``_get``, ``_head``, ``_post``, 
+    Helpers for the other HTTP methods also exist. The full list is as follows: ``_get``, ``_head``, ``_post``,
     ``_put``, ``_patch``, ``_delete`` and ``_options``.
 
     Routes are not usually created by using the ``Routes`` class directly, except in the ``Server`` abstract
@@ -57,7 +59,7 @@ class Route:
     and provided as arguments when calling the action. For example, in the ``"/v3.0/agents/123"`` case, the action
     will receive ``"3.0"`` and ``"123"`` as arguments.
     """
-    
+
     # A subset of HTTP methods defined in RFC 9110 and RFC 5789 which will be commonly handled by a REST API
     ALLOWABLE_METHODS = ["get", "head", "post", "put", "patch", "delete", "options"]
 
@@ -69,7 +71,7 @@ class Route:
     # unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
     # pct-encoded = "%" HEXDIG HEXDIG
     # sub-delims = "!" / "$" / "&" / "'" / "(" / ")" / "*" / "+" / "," / ";" / "="
-    
+
     # This ABNF translates to the following regular expression syntax:
     UNRESERVED = "[A-Za-z0-9-._~]"
     PCT_ENCODED = "%[0-9A-Fa-f]{2}"
@@ -92,7 +94,7 @@ class Route:
             return True
         else:
             return False
-        
+
     @staticmethod
     def _split_path(path):
         """Splits a URI path into segments by slash. Assumes the value provided is a valid path.
@@ -114,7 +116,7 @@ class Route:
         return segments
 
     def __init__(self, method, pattern, controller, action, allow_insecure=False):
-        """Instantiates a newly created route with the given method, pattern, controller and action. Typically, this 
+        """Instantiates a newly created route with the given method, pattern, controller and action. Typically, this
         should be done by using the helper methods in the ``Server`` abstract base class.
 
         :param method: The HTTP method which the route will match (e.g., ``"get"``, ``"post"``, etc.)
@@ -130,13 +132,13 @@ class Route:
         """
         if not isinstance(method, str):
             raise TypeError("route method must be of type str")
-        
+
         if not isinstance(pattern, str):
             raise TypeError("route pattern must be of type str")
-        
+
         if not issubclass(controller, Controller):
             raise TypeError("route controller must be a subclass of Controller")
-        
+
         if not isinstance(action, str):
             raise TypeError("route action must be of type str")
 
@@ -144,12 +146,14 @@ class Route:
 
         if method not in Route.ALLOWABLE_METHODS:
             raise InvalidMethod(f"route defined with invalid method '{method}'")
-        
+
         if not Route.validate_abs_path(pattern):
             raise InvalidPathOrPattern(f"route defined with pattern '{pattern}' which is not a valid URI path")
-        
+
         if not hasattr(controller, action) or not callable(getattr(controller, action)):
-            raise ActionUndefined(f"route defined with action '{action}' which does not exist in controller '{controller.__name__}'")
+            raise ActionUndefined(
+                f"route defined with action '{action}' which does not exist in controller '{controller.__name__}'"
+            )
 
         self._method = method
         self._controller = controller
@@ -191,21 +195,21 @@ class Route:
             delimiter_count = pattern_segments[i].count(":")
 
             # Multiple parameters in a single segment (e.g., "/:one:two") would be ambiguous,
-            # so this is not allowed. 
+            # so this is not allowed.
             if delimiter_count >= 2:
                 raise InvalidPathOrPattern(f"pattern '{pattern}' contains multiple parameters in a single segment")
-            
+
             # If the segment has exactly one parameter, parse the segment into its component parts: the parameter
             # plus anything that precedes the parameter
             if delimiter_count == 1:
                 parts = pattern_segments[i].split(":")
                 prefix = parts[0]
                 param_name = parts[1]
-                
+
                 # A parameter delimiter must be followed by a name (e.g., "/:/example" is not allowed).
                 if len(param_name) <= 0:
                     raise InvalidPathOrPattern(f"pattern '{pattern}' contains a parameter with no name")
-                
+
                 pattern_segments[i] = {"prefix": prefix, "param": param_name}
 
             # If the segment has no parameters, leave it as is.
@@ -225,7 +229,7 @@ class Route:
         """
         if not Route.validate_abs_path(path):
             raise InvalidPathOrPattern(f"path '{path}' is not a valid URI")
-        
+
         parameters = {}
         pattern_segments = self._pattern_segments
         path_segments = Route._split_path(path)
@@ -253,20 +257,20 @@ class Route:
 
             # If this segment of the parsed pattern contains a substring before the parameter, this
             # substring prefix should match the corresponding substring in the pattern verbatim.
-            if path_segments[i][0:len(prefix)] != prefix:
+            if path_segments[i][0 : len(prefix)] != prefix:
                 raise PatternMismatch(
                     f"prefix '{prefix}' not found in segment '{path_segments[i]}' of path '{path}' as required "
                     f"by route pattern '{self.pattern}'"
                 )
 
-            param_value = path_segments[i][len(prefix):]
+            param_value = path_segments[i][len(prefix) :]
 
             # A parameter should capture at least one character in order for the pattern to be considered matching.
             if len(param_value) <= 0:
                 raise PatternMismatch(
-                        f"segment '{path_segments[i]}' of path '{path}' does not contain a value matching "
-                        f"parameter ':{param_name}' from route pattern '{self.pattern}'"
-                    )
+                    f"segment '{path_segments[i]}' of path '{path}' does not contain a value matching "
+                    f"parameter ':{param_name}' from route pattern '{self.pattern}'"
+                )
 
             parameters[param_name] = param_value
 
@@ -289,7 +293,7 @@ class Route:
             raise
 
         return True
-    
+
     def matches(self, method, path):
         """Checks whether a given method and path conforms to the route method and pattern.
 
@@ -305,9 +309,9 @@ class Route:
 
         if method not in Route.ALLOWABLE_METHODS:
             raise InvalidMethod(f"method '{method}' is not an allowable HTTP method")
-        
-        return (self.method == method and self.matches_path(path))
-    
+
+        return self.method == method and self.matches_path(path)
+
     def new_controller(self, *args, **kargs):
         """Creates a new instance of the controller specified by the route in order to handle a new incoming request.
 
@@ -317,7 +321,7 @@ class Route:
         :returns: A new controller instance
         """
         return self.controller(*args, **kargs)
-    
+
     def call_action(self, controller_inst, path, params={}):
         """Calls the controller action specified by the route in order to handle a new incoming request.
 
@@ -328,7 +332,7 @@ class Route:
         :param path: The path from the incoming request to parse according to the route's pattern
         :param params: An optional dictionary of parameters to pass to the action
 
-        :raises: :class:`ActionError`: The action call failed because the parameters provided (in `path` and `params`) 
+        :raises: :class:`ActionError`: The action call failed because the parameters provided (in `path` and `params`)
         did not match the parameters defined in the method signature for the action
 
         :returns: The result returned by the action
@@ -340,10 +344,10 @@ class Route:
             )
 
         path_params = self.capture_params(path)
-        params = { **params, **path_params }
+        params = {**params, **path_params}
 
         action_func = getattr(controller_inst, self.action)
-        
+
         try:
             return action_func(**params)
         except TypeError as err:
@@ -358,15 +362,15 @@ class Route:
     @property
     def method(self):
         return self._method
-    
+
     @property
     def pattern(self):
         return self._pattern
-    
+
     @property
     def controller(self):
         return self._controller
-    
+
     @property
     def action(self):
         return self._action

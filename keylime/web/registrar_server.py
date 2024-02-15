@@ -1,11 +1,11 @@
 from keylime.web.base.server import Server
 from keylime.web.registrar.agents_controller import AgentsController
 
-class RegistrarServer(Server):
 
+class RegistrarServer(Server):
     def _setup(self):
         self._use_config("registrar")
-    
+
     def _routes(self):
         self._v2_routes()
 

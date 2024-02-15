@@ -1,10 +1,13 @@
+import asyncio
+
+import tornado.process
+
 from keylime import cloud_verifier_tornado, config, keylime_logging
-# from keylime.web import VerifierServer
-from keylime.models.base import db_manager
 from keylime.common.migrations import apply
 from keylime.mba import mba
-import asyncio
-import tornado.process
+
+# from keylime.web import VerifierServer
+from keylime.models.base import db_manager
 
 logger = keylime_logging.init_logging("verifier")
 

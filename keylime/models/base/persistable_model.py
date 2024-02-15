@@ -1,10 +1,16 @@
-from sqlalchemy import Table, Column, ForeignKey, Integer, Text
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, ForeignKey, Integer, Table, Text
 from sqlalchemy.dialects.mysql import LONGTEXT
+from sqlalchemy.orm import relationship
+
 from keylime.models.base import BasicModel
-from keylime.models.base.associations import HasOneAssociation, HasManyAssociation, BelongsToAssociation, AssociatedRecordSet
-from keylime.models.base.errors import SchemaInvalid, QueryInvalid, FieldValueInvalid
+from keylime.models.base.associations import (
+    AssociatedRecordSet,
+    BelongsToAssociation,
+    HasManyAssociation,
+    HasOneAssociation,
+)
 from keylime.models.base.db import db_manager
+from keylime.models.base.errors import FieldValueInvalid, QueryInvalid, SchemaInvalid
 
 
 class PersistableModel(BasicModel):
@@ -15,7 +21,7 @@ class PersistableModel(BasicModel):
 
     For details on the schema, data validation and change management APIs, refer to the documentation for
     ``BasicModel``. You should subclass ``BasicModel`` directly in cases where you need an in-memory model that is
-    not persisted to the database. 
+    not persisted to the database.
     """
 
     BUILT_IN_INST_ATTRS = [*BasicModel.BUILT_IN_INST_ATTRS, "db_mapping_inst", "_db_mapping_inst"]
@@ -25,14 +31,14 @@ class PersistableModel(BasicModel):
     @staticmethod
     def __new_db_mapping(class_name):
         # Create empty Python class which will later be mapped to a database table
-        db_mapping = type(class_name, (object, ), {})
+        db_mapping = type(class_name, (object,), {})
 
         # Because the dynamically-defined mapping class does not belong to a Python module in the usual sense, set
         # the module name to point to this method (where the definition of the mapping class occurs)
         setattr(db_mapping, "__module__", "PersistableModel.__new_db_mapping.<locals>")
 
         return db_mapping
-    
+
     @staticmethod
     def __make_db_table(table_name, columns):
         # Create empty SQLAlchemy Table which will used to map a class to the database
@@ -43,7 +49,7 @@ class PersistableModel(BasicModel):
             db_table.append_column(column)
 
         return db_table
-    
+
     @staticmethod
     def __assoc_to_rship(association):
         lazy = "joined" if association.preload else "select"
@@ -65,7 +71,7 @@ class PersistableModel(BasicModel):
         # If schema has already been processed (and no changes have been made since), do not process again
         if cls._schema_processed:
             return
-        
+
         # First, build the model's internal representation of the schema, as defined
         super()._process_schema()
 
@@ -86,11 +92,11 @@ class PersistableModel(BasicModel):
 
     @classmethod
     def _process_db_mapping(cls):
-        # If the mapping class' attributes have already been mapped to their corresponding database entities, 
+        # If the mapping class' attributes have already been mapped to their corresponding database entities,
         # do not repeat unless the schema has since changed
         if cls.__db_mapping_processed:
             return
-        
+
         # If the model's internal representation of the schema is stale, reset and rebuild
         cls._process_schema()
 
@@ -105,7 +111,7 @@ class PersistableModel(BasicModel):
             )
 
         # Build SQLAlchemy Relationships from the associations defined by the model's schema
-        relationships = { name: cls.__assoc_to_rship(association) for name, association in cls._associations.items() }
+        relationships = {name: cls.__assoc_to_rship(association) for name, association in cls._associations.items()}
         # Use SQLAlchemy to map the empty mapping class to the DB by providing the SQLAlchemy Table and Relationships
         db_manager.registry.map_imperatively(cls.__db_mapping, cls.__db_table, properties=relationships)
 
@@ -125,7 +131,7 @@ class PersistableModel(BasicModel):
             cls.__primary_key.add(name)
 
         if not isinstance(column_args, tuple):
-            column_args = (column_args, )
+            column_args = (column_args,)
 
         cls.__db_columns.append(Column(name, type, *column_args, nullable=nullable, primary_key=primary_key))
 
@@ -187,7 +193,7 @@ class PersistableModel(BasicModel):
         # Create a new field for the foreign key
         other_model = association.other_model
         foreign_key = association.foreign_key
-        is_primary_key = (name in cls.__primary_key)
+        is_primary_key = name in cls.__primary_key
 
         if len(other_model.primary_key) != 1:
             raise SchemaInvalid(
@@ -199,49 +205,52 @@ class PersistableModel(BasicModel):
         foreign_key_type = other_model._fields[other_model_id].type
 
         cls._new_field(
-            foreign_key, foreign_key_type, nullable=True, primary_key=is_primary_key,
-            column_args=(ForeignKey(f"{other_model.__table_name}.{other_model_id}"))
+            foreign_key,
+            foreign_key_type,
+            nullable=True,
+            primary_key=is_primary_key,
+            column_args=(ForeignKey(f"{other_model.__table_name}.{other_model_id}")),
         )
 
     @classmethod
     def all(cls, **filters):
         cls._process_db_mapping()
-        
-        filters = { name: value for name, value in filters.items() if value is not None }
+
+        filters = {name: value for name, value in filters.items() if value is not None}
 
         with db_manager.session_context() as session:
             results = session.query(cls.db_mapping).filter_by(**filters).all()
-            results = [ cls(mapping_inst) for mapping_inst in results ]
+            results = [cls(mapping_inst) for mapping_inst in results]
 
         return results
 
     @classmethod
     def all_ids(cls, **filters):
         cls._process_db_mapping()
-        
+
         if not cls.__id:
             raise QueryInvalid(f"model '{cls.__name__}' does not have an ID field")
-        
-        id_column = cls.db_table.columns[cls.__id] # type: ignore
-        filters = { name: value for name, value in filters.items() if value is not None }
+
+        id_column = cls.db_table.columns[cls.__id]  # type: ignore
+        filters = {name: value for name, value in filters.items() if value is not None}
 
         with db_manager.session_context() as session:
             results = session.query(id_column).filter_by(**filters).all()
-            results = [ row._asdict()[cls.__id] for row in results ]
+            results = [row._asdict()[cls.__id] for row in results]
 
         return results
 
     @classmethod
     def get(cls, id=None, **filters):
         cls._process_db_mapping()
-        
+
         if id:
             if not cls.__id:
                 raise QueryInvalid(f"model '{cls.__name__}' does not have an ID field")
             else:
                 filters[cls.__id] = id
-        
-        filters = { name: value for name, value in filters.items() if value is not None }
+
+        filters = {name: value for name, value in filters.items() if value is not None}
 
         with db_manager.session_context() as session:
             results = db_manager.session().query(cls.db_mapping).filter_by(**filters).one_or_none()
@@ -252,12 +261,12 @@ class PersistableModel(BasicModel):
             results = None
 
         return results
-    
+
     @classmethod
     def get_one(cls, **filters):
         cls._process_db_mapping()
-        
-        filters = { name: value for name, value in filters.items() if value is not None }
+
+        filters = {name: value for name, value in filters.items() if value is not None}
 
         with db_manager.session_context() as session:
             results = session.query(cls.db_mapping).filter_by(**filters).one_or_none()
@@ -268,12 +277,12 @@ class PersistableModel(BasicModel):
             results = None
 
         return results
-    
+
     @classmethod
     @property
     def _repr_fields(cls):
         field_names = super()._repr_fields
-        field_names = [ name for name in field_names if name not in cls.primary_key ]
+        field_names = [name for name in field_names if name not in cls.primary_key]
         field_names = list(cls.primary_key) + field_names
         return field_names[:5]
 
@@ -281,7 +290,7 @@ class PersistableModel(BasicModel):
     @property
     def persistable(cls):
         return True
-    
+
     @classmethod
     @property
     def db_mapping(cls):
@@ -310,27 +319,36 @@ class PersistableModel(BasicModel):
     @property
     def has_one_associations(cls):
         cls._process_schema()
-        return { name: association for name, association in cls.associations.items()
-                 if isinstance(association, HasOneAssociation) }
+        return {
+            name: association
+            for name, association in cls.associations.items()
+            if isinstance(association, HasOneAssociation)
+        }
 
     @classmethod
     @property
     def has_many_associations(cls):
         cls._process_schema()
-        return { name: association for name, association in cls.associations.items()
-                 if isinstance(association, HasManyAssociation) }
+        return {
+            name: association
+            for name, association in cls.associations.items()
+            if isinstance(association, HasManyAssociation)
+        }
 
     @classmethod
     @property
     def belongs_to_associations(cls):
         cls._process_schema()
-        return { name: association for name, association in cls.associations.items()
-                 if isinstance(association, BelongsToAssociation) }
+        return {
+            name: association
+            for name, association in cls.associations.items()
+            if isinstance(association, BelongsToAssociation)
+        }
 
     def __init__(self, data={}, process_associations=True):
         self.__class__._process_db_mapping()
 
-        if isinstance(data, self.__class__.db_mapping): # type: ignore
+        if isinstance(data, self.__class__.db_mapping):  # type: ignore
             super().__init__({}, process_associations)
             self._init_from_mapping(data, process_associations)
         else:
@@ -344,7 +362,6 @@ class PersistableModel(BasicModel):
             self.change(name, value)
 
         if process_associations:
-
             for name, association in self.__class__.associations.items():
                 association_mapping = getattr(mapping_inst, name)
 
@@ -355,7 +372,7 @@ class PersistableModel(BasicModel):
         self._force_commit_changes()
 
     def _init_from_dict(self, data, process_associations):
-        self._db_mapping_inst = self.__class__.db_mapping() # type: ignore
+        self._db_mapping_inst = self.__class__.db_mapping()  # type: ignore
 
         for name, value in data:
             self.change(name, value)

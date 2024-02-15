@@ -1,15 +1,17 @@
+import asyncio
 from abc import ABC, abstractmethod
 from functools import wraps
 from ssl import CERT_OPTIONAL
-import asyncio
+
 import tornado
+
 from keylime import config, web_util
-from keylime.web.base.route import Route
 from keylime.web.base.action_handler import ActionHandler
+from keylime.web.base.route import Route
 
 
 class Server(ABC):
-    """The Server abstract class provides a domain-specific language (DSL) for defining an HTTP server with a set of 
+    """The Server abstract class provides a domain-specific language (DSL) for defining an HTTP server with a set of
     specific endpoints. This is translated into a list of routes (see the ``Route`` class) which is ordered according to
     priority and can be matched against incoming requests based on their HTTP method and URL path.
 
@@ -27,13 +29,13 @@ class Server(ABC):
     These calls must happen within the ``_routes`` method or a method which is called by ``_routes``. Each helper method
     takes a path pattern, controller and action. For more details on these parameters, refer to the documentation for
     the ``Route`` class.
-    
+
     In the event that multiple routes apply to a single request, routes defined earlier will take priority
     over routes defined later.
 
     Once a server is defined by subclassing Server as above, it can be used by creating a new instance and calling
     the ``start`` instance method::
-    
+
         server = ExampleServer()
         server.start()
 
@@ -71,7 +73,7 @@ class Server(ABC):
                 self._get("/v2/agents/:id", AgentsController, "show")
                 self._get("/v2.:minor/agents/:id", AgentsController, "show")
                 self._get("/", HomeController, "index")
-    
+
     Notice that the ``"index"`` and ``"show"`` actions of ``AgentsController`` will now handle requests made to version
     2 of the API, regardless of whether a minor version is specified or not.
     """
@@ -81,7 +83,7 @@ class Server(ABC):
         # Create a decorator which will scope routes to major_version
         def version_scope_decorator(func):
             # Create a wrapper function which will take the place of the decorated function (func)
-            @wraps(func) # preserves the name and module of func when introspected
+            @wraps(func)  # preserves the name and module of func when introspected
             def version_scope_wrapper(obj, *args, **kwargs):
                 if not isinstance(obj, Server):
                     raise TypeError(
@@ -101,10 +103,24 @@ class Server(ABC):
                     # Check that the current route is a route newly created by the decorated function
                     if route not in initial_routes:
                         # Define routes scoped to the API version specified by major_version
-                        new_routes_list.extend([
-                            Route(route.method, f"/v{major_version}{route.pattern}", route.controller, route.action, route.allow_insecure),
-                            Route(route.method, f"/v{major_version}.:minor{route.pattern}", route.controller, route.action, route.allow_insecure)
-                        ])
+                        new_routes_list.extend(
+                            [
+                                Route(
+                                    route.method,
+                                    f"/v{major_version}{route.pattern}",
+                                    route.controller,
+                                    route.action,
+                                    route.allow_insecure,
+                                ),
+                                Route(
+                                    route.method,
+                                    f"/v{major_version}.:minor{route.pattern}",
+                                    route.controller,
+                                    route.action,
+                                    route.allow_insecure,
+                                ),
+                            ]
+                        )
 
                 # Replace the Server instance's list of routes with a new list consisting of the routes which were
                 # present before func was called and the new routes scoped to major_version
@@ -112,7 +128,9 @@ class Server(ABC):
 
                 # Return the return value of the decorated function in case it is something other than None
                 return value
+
             return version_scope_wrapper
+
         return version_scope_decorator
 
     def __init__(self, **options):
@@ -127,7 +145,7 @@ class Server(ABC):
         self._host = "127.0.0.1"
         self._http_port = 80
         self._https_port = 443
-        self._max_upload_size = 104857600 # 100MiB
+        self._max_upload_size = 104857600  # 100MiB
         self._ssl_ctx = None
 
         # Override defaults with values given by the implementing class
@@ -140,13 +158,13 @@ class Server(ABC):
 
         if not self.host:
             raise ValueError(f"server '{self.__class__.__name__}' cannot be initialised without a value for 'host'")
-        
+
         if not self.http_port or (not self.https_port or not self.ssl_ctx):
             raise ValueError(
                 f"server '{self.__class__.__name__}' cannot be initialised without either 'http_port' or 'https_port'"
                 f"and 'ssl_ctx'"
             )
-        
+
         # Initialise empty list for routes
         self.__routes = []
 
@@ -154,9 +172,7 @@ class Server(ABC):
         self._routes()
 
         # Create new Tornado app with request handler to process routes
-        self.__tornado_app = tornado.web.Application([
-            (r".*", ActionHandler, {"server": self})
-        ])
+        self.__tornado_app = tornado.web.Application([(r".*", ActionHandler, {"server": self})])
 
         # Bind socket for HTTP connections
         self.__tornado_http_sockets = tornado.netutil.bind_sockets(int(self.http_port), address=self.host)
@@ -165,7 +181,7 @@ class Server(ABC):
         self.__tornado_https_sockets = tornado.netutil.bind_sockets(int(self.https_port), address=self.host)
 
     async def start(self):
-        """Instantiates and starts the server (with one Tornado HTTPServer instance to handle HTTP connections 
+        """Instantiates and starts the server (with one Tornado HTTPServer instance to handle HTTP connections
         and another to handle HTTPS connections).
 
         This should be done once per process. When new processes are created by forking, this method
@@ -173,15 +189,11 @@ class Server(ABC):
         """
 
         self.__tornado_http_server = tornado.httpserver.HTTPServer(
-            self.__tornado_app,
-            ssl_options=None,
-            max_buffer_size=self.max_upload_size
+            self.__tornado_app, ssl_options=None, max_buffer_size=self.max_upload_size
         )
 
         self.__tornado_https_server = tornado.httpserver.HTTPServer(
-            self.__tornado_app,
-            ssl_options=self.ssl_ctx,
-            max_buffer_size=self.max_upload_size
+            self.__tornado_app, ssl_options=self.ssl_ctx, max_buffer_size=self.max_upload_size
         )
 
         self.__tornado_http_server.add_sockets(self.__tornado_http_sockets)
@@ -196,8 +208,8 @@ class Server(ABC):
 
     @abstractmethod
     def _routes(self):
-        """Defines the routes accepted the server. Must be overridden by the implementing class and include one 
-        or more calls to the ``_get``, ``_head``, ``_post``, ``_put``, ``_patch``, ``_delete`` and/or ``_options`` 
+        """Defines the routes accepted the server. Must be overridden by the implementing class and include one
+        or more calls to the ``_get``, ``_head``, ``_post``, ``_put``, ``_patch``, ``_delete`` and/or ``_options``
         helper methods.
         """
         pass
@@ -254,8 +266,7 @@ class Server(ABC):
         self.__routes.append(Route("options", pattern, controller, action, allow_insecure))
 
     def first_matching_route(self, method, path):
-        """Gets the highest-priority route which matches the given ``method`` and ``path``.
-        """
+        """Gets the highest-priority route which matches the given ``method`` and ``path``."""
         if method == None:
             matching_routes = (route for route in self.__routes if route.matches_path(path))
         else:
@@ -269,7 +280,7 @@ class Server(ABC):
     @property
     def http_port(self):
         return self._http_port
-    
+
     @property
     def https_port(self):
         return self._https_port
@@ -281,7 +292,7 @@ class Server(ABC):
     @property
     def max_upload_size(self):
         return self._max_upload_size
-    
+
     @property
     def ssl_ctx(self):
         return self._ssl_ctx

@@ -1,10 +1,12 @@
-from types import MappingProxyType
-from typing import Union
-from tornado.escape import parse_qs_bytes
-from tornado.httputil import parse_body_arguments
 import http.client
 import json
 import re
+from types import MappingProxyType
+from typing import Union
+
+from tornado.escape import parse_qs_bytes
+from tornado.httputil import parse_body_arguments
+
 
 class Controller:
     """A controller represents a collection of actions that an API consumer can perform on a resource or set of
@@ -26,7 +28,7 @@ class Controller:
     be referenced by a route defined by a ``Server`` subclass.
 
     Each action handles a specify type of request and receives a number of parameters which are extracted from the
-    incoming request. These parameters include those present in the URL or in the HTTP request body. Parameters will be 
+    incoming request. These parameters include those present in the URL or in the HTTP request body. Parameters will be
     extracted so long as they are encoded in URL query format, as form data or as JSON. Additionally, the parameters
     will include any indicated by the route's pattern (refer to the documentation for ``Route`` for details).
 
@@ -59,13 +61,13 @@ class Controller:
 
     @staticmethod
     def decode_url_query(query: bytes) -> dict[str, str | list[str]]:
-        """Parses a binary query string (whether from a URL or HTTP body) into a dict of Unicode strings. If multiple  
+        """Parses a binary query string (whether from a URL or HTTP body) into a dict of Unicode strings. If multiple
         instance of the same key are present in the string, their values are collected into a list.
 
         Note that keys and values are interpreted according to the latin-1 unicode character block because of how
         Tornado has implemented query string parsing. This is a valid interpretation of RFC 3986 because the standard
-        does not specify how query strings should be interpreted. The benefit is that all possible bytes can be 
-        represented as a character, but has the drawback that non-latin characters represented in the query string 
+        does not specify how query strings should be interpreted. The benefit is that all possible bytes can be
+        represented as a character, but has the drawback that non-latin characters represented in the query string
         using URI percent-encoding will be converted to the wrong characters.
         """
         query_params = parse_qs_bytes(query)
@@ -81,20 +83,20 @@ class Controller:
                 raise
 
         return query_params
-    
+
     @staticmethod
     def decode_multipart_form(content_type: str, form: bytes) -> dict[str, Union[str, bytes, list[str | bytes]]]:
-        """Parses a binary HTTP body encoded with the "multipart/form-data" media type into a dict of Unicode strings. 
+        """Parses a binary HTTP body encoded with the "multipart/form-data" media type into a dict of Unicode strings.
         Multiple instances of the same key are collected into a list.
 
-        As a multipart/form-data body may contain arbitrary binary data, values not interpretable as Unicode will be 
-        left as-is and returned as bytes object. Ideally, the media type of each part would be used to determine its 
+        As a multipart/form-data body may contain arbitrary binary data, values not interpretable as Unicode will be
+        left as-is and returned as bytes object. Ideally, the media type of each part would be used to determine its
         encoding, but Tornado's implementation does not make use of this feature of RFC 7578.
         """
         form_params = {}
 
         parse_body_arguments(content_type, form, form_params, {})
-                
+
         for name, values in form_params.items():
             try:
                 if len(values) > 1:
@@ -106,7 +108,7 @@ class Controller:
                 form_params[name] = values
 
         return form_params
-    
+
     @staticmethod
     def prepare_http_body(body, content_type=None):
         """Prepares an object to be included in the body of an HTTP request or response and infers the appropriate
@@ -116,12 +118,12 @@ class Controller:
         :param body: The body of the request/response
         :param content_type: An optional media/MIME type used to interpret the contents of `body`
 
-        :returns: `(body, content_type)` where `body` is the value the caller should use as the body of the HTTP 
+        :returns: `(body, content_type)` where `body` is the value the caller should use as the body of the HTTP
         request/response and `content_type` is the that the caller should include in the "Content-Type" HTTP header.
         """
         if content_type and not isinstance(content_type, str):
             raise TypeError(f"content_type '{content_type}' is not of type str")
-        
+
         if content_type:
             content_type = content_type.lower().strip()
 
@@ -156,13 +158,13 @@ class Controller:
                 content_type = content_type
 
         return (body, content_type)
-    
+
     @staticmethod
     def __new__(cls, action_handler, *args, **kwargs):
         if cls is Controller:
             raise TypeError("Only children of the Controller class may be instantiated")
         return super(Controller, cls).__new__(cls, *args, **kwargs)
-    
+
     def __init__(self, action_handler):
         self._action_handler = action_handler
         self._path_params = None
@@ -188,10 +190,10 @@ class Controller:
 
         if not isinstance(status_code, int):
             raise TypeError(f"status code '{status_code}' is not of type int")
-        
+
         if status_msg and not isinstance(status_msg, str):
             raise TypeError(f"status message '{status_msg}' is not of type str")
-        
+
         if content_type and not isinstance(content_type, str):
             raise TypeError(f"content_type '{content_type}' is not of type str")
 
@@ -210,7 +212,7 @@ class Controller:
         self.action_handler.finish()
 
     def respond(self, code=200, status=None, data=None):
-        """Converts a Python data structure to JSON and wraps it in the following boilerplate JSON object which is  
+        """Converts a Python data structure to JSON and wraps it in the following boilerplate JSON object which is
         returned by all v2 endpoints:
 
         {
@@ -240,7 +242,7 @@ class Controller:
     @property
     def action_handler(self):
         return self._action_handler
-    
+
     @property
     def request_body(self):
         return self.action_handler.request.body
@@ -253,7 +255,7 @@ class Controller:
     def path_params(self):
         if not self._path_params:
             path_params = self.action_handler.matching_route.capture_params(self.path)
-            
+
             # Note: At this point, the parameters defined by the route will have previously been extracted from the
             # path in order to route the request to the controller + action, so if capture_params raises an exception
             # here, this would be an unexpected error which should be processed by the default handler.
@@ -292,13 +294,13 @@ class Controller:
             if content_type and content_type.startswith("multipart/form-data"):
                 form_params = Controller.decode_multipart_form(content_type, self.request_body)
 
-            # If the request's Content-Type is neither application/x-www-form-urlencoded nor multipart/form-data, 
+            # If the request's Content-Type is neither application/x-www-form-urlencoded nor multipart/form-data,
             # form_params is left blank.
 
             self._form_params = MappingProxyType(form_params)
 
         return self._form_params
-    
+
     @property
     def json_params(self):
         if not self._form_params:
@@ -319,10 +321,10 @@ class Controller:
             self._json_params = MappingProxyType(json_params)
 
         return self._json_params
-    
+
     @property
     def major_version(self) -> int | None:
-        """Extracts the major API version from the path, if present. E.g., if the path being handled starts with 
+        """Extracts the major API version from the path, if present. E.g., if the path being handled starts with
         "/v2.0", "/v2.5" or "/v2", this method will return ``2``.
         """
         if not self._major_version:
@@ -332,14 +334,14 @@ class Controller:
                 major_version = int(result.group(1)) if result else None
             except (TypeError, ValueError):
                 major_version = None
-            
+
             self._major_version = major_version
 
         return self._major_version
-    
+
     @property
     def minor_version(self) -> int | None:
-        """Extracts the minor API version from the path, if present. E.g., if the path being handled starts with 
+        """Extracts the minor API version from the path, if present. E.g., if the path being handled starts with
         "/v2.0", this method will return ``0``. If the path starts with "/v2" instead, the method will return ``None``.
         """
         if not self._major_version:
@@ -349,7 +351,7 @@ class Controller:
                 minor_version = int(result.group(2)) if result else None
             except (TypeError, ValueError):
                 minor_version = None
-            
+
             self._minor_version = minor_version
 
         return self._minor_version

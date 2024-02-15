@@ -1,6 +1,6 @@
-from keylime.web.base import Controller
-from keylime.models import RegistrarAgent
 from keylime import keylime_logging
+from keylime.models import RegistrarAgent
+from keylime.web.base import Controller
 
 logger = keylime_logging.init_logging("registrar")
 
@@ -19,13 +19,13 @@ class AgentsController(Controller):
         if not agent:
             self.respond(404, f"Agent with ID '{agent_id}' not found")
             return
-        
+
         if not agent.active:
             self.respond(404, f"Agent with ID '{agent_id}' has not been activated")
             return
 
         self.respond(200, "Success", agent.render())
-    
+
     # POST /v2[.:minor]/agents/[:agent_id]
     def create(self, agent_id, **params):
         agent = RegistrarAgent.get(agent_id) or RegistrarAgent.empty()
@@ -53,7 +53,7 @@ class AgentsController(Controller):
 
         agent.delete()
         self.respond(200, "Success")
-    
+
     # POST /v2[.:minor]/agents/:agent_id/activate/
     def activate(self, agent_id, auth_tag, **params):
         agent = RegistrarAgent.get(agent_id)
@@ -61,7 +61,7 @@ class AgentsController(Controller):
         if not agent:
             self.respond(404, f"Agent with ID '{agent_id}' not found")
             return
-        
+
         accepted = agent.verify_ak_response(auth_tag)
         agent.commit_changes()
         self.respond(200, "Success")
@@ -71,4 +71,3 @@ class AgentsController(Controller):
                 f"Auth tag '{auth_tag}' for agent '{agent_id}' does not match expected value. It will need to be "
                 f"restarted in order to reattempt registration."
             )
-

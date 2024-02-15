@@ -1,13 +1,13 @@
 import os
 from configparser import NoOptionError
+from contextlib import contextmanager
 from sqlite3 import Connection as SQLite3Connection
 from typing import Any, Dict, Optional, cast
-from contextlib import contextmanager
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session, scoped_session, sessionmaker, registry
+from sqlalchemy.orm import Session, registry, scoped_session, sessionmaker
 
 from keylime import config, keylime_logging
 
@@ -89,21 +89,21 @@ class DBManager:
         self._engine = create_engine(url, **engine_args)
         self._registry = registry()
         return self._engine
-    
+
     @property
     def service(self) -> Optional[str]:
         if not self._registry:
             raise NoEngineError("cannot access the service for a DBManager before a call to db_manager.make_engine()")
-        
+
         return self._service
-    
+
     @property
     def engine(self) -> Engine:
         if not self._registry:
             raise NoEngineError("cannot access the engine for a DBManager before a call to db_manager.make_engine()")
-        
+
         return self._engine
-    
+
     @property
     def registry(self) -> registry:
         if not self._registry:
@@ -117,7 +117,7 @@ class DBManager:
         """
         if not self._registry:
             raise NoEngineError("cannot access the session for a DBManager before a call to db_manager.make_engine()")
-        
+
         if not self._scoped_session:
             self._scoped_session = scoped_session(sessionmaker())
 
@@ -128,7 +128,7 @@ class DBManager:
                 logger.error("Error creating SQL session manager %s", err)
 
         return cast(Session, self._scoped_session())
-    
+
     @contextmanager
     def session_context(self):
         session = self.session()
@@ -140,8 +140,10 @@ class DBManager:
             session.rollback()
             raise
 
+
 class DBManagerError(Exception):
     pass
+
 
 class NoEngineError(DBManagerError):
     pass

@@ -1,6 +1,8 @@
 from tornado.web import RequestHandler
-from keylime.web.base.errors import ActionDispatchError, ActionIncompleteError
+
 from keylime.web.base.default_controller import DefaultController
+from keylime.web.base.errors import ActionDispatchError, ActionIncompleteError
+
 
 class ActionHandler(RequestHandler):
     """ActionHandler is a Tornado RequestHandler which accepts requests and directs them to the appropriate
@@ -9,7 +11,7 @@ class ActionHandler(RequestHandler):
     instantiated, it receives a copy of the Server which it uses to find the highest-priority matching route and
     uses this to determine the controller to use and the action to call. If any part of this process fails,
     ActionHandler will gracefully handle the error condition and return an appropriate HTTP response.
-    
+
     Similarly, if an exception is raised while executing an action, and that exception is not caught by the action
     itself, ActionHandler will safely handle this unexpected condition.
 
@@ -23,7 +25,7 @@ class ActionHandler(RequestHandler):
         self._controller = DefaultController(self)
         self._finished = False
 
-    def prepare(self):        
+    def prepare(self):
         # Find highest-priority route which matches the request
         route = self.server.first_matching_route(self.request.method, self.request.path)
 
@@ -36,7 +38,7 @@ class ActionHandler(RequestHandler):
                 self.controller.method_not_allowed()
             else:
                 self.controller.not_found()
-                
+
             return
 
         # Handle situation where HTTP is used to access an HTTPS-only route
@@ -52,7 +54,7 @@ class ActionHandler(RequestHandler):
         # Do not attempt to further process request if no route or controller is available
         if not self.matching_route or isinstance(self.controller, DefaultController):
             return
-        
+
         # Parse any parameters in the query portion of the URL or in the body of the request
         try:
             query_params = self.controller.query_params
@@ -85,7 +87,7 @@ class ActionHandler(RequestHandler):
                 f"action '{self.matching_route.action}' in controller '{self.controller.__class__.__name__}'"
                 f" did not produce a response"
             )
-        
+
     def write_error(self, code, **kwargs):
         if code == 405 and kwargs.get("exc_info"):
             # If an HTTP method is not supported by the server (rather than not supported for a given resource),
@@ -121,15 +123,15 @@ class ActionHandler(RequestHandler):
     @property
     def server(self):
         return self._server
-    
+
     @property
     def matching_route(self):
         return self._matching_route
-    
+
     @property
     def controller(self):
         return self._controller
-    
+
     @property
     def finished(self):
         return self._finished

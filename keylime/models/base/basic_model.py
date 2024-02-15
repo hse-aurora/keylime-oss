@@ -1,18 +1,22 @@
+import base64
+import binascii
+import re
 from abc import ABC, abstractmethod
 from types import MappingProxyType
-import re, base64, binascii
+
 from sqlalchemy.types import PickleType
+
+from keylime.models.base.errors import FieldValueInvalid, UndefinedField
 from keylime.models.base.field import ModelField
-from keylime.models.base.errors import UndefinedField, FieldValueInvalid
 
 
 class BasicModel(ABC):
     """A model is a class which represents a data object in the system, each with a number of defined "fields".
-    Individual instances are known as "records" and contain values for the model's fields. Models encapsulate the 
+    Individual instances are known as "records" and contain values for the model's fields. Models encapsulate the
     functionality related to querying, manipulating, validating and displaying records.
-    
+
     The BasicModel abstract class provides the basic functionality common to all models including:
-    
+
     * a domain-specific language (DSL) for specifying a schema to which individual records are expected to adhere;
     * an validation API for checking that the fields adhere to an expected format; and
     * an API for collecting changes to a record and applying them if they pass validation rules.
@@ -21,7 +25,16 @@ class BasicModel(ABC):
     inherits from ``BasicModel``).
     """
 
-    BUILT_IN_INST_ATTRS = ["record_values", "_record_values", "changes", "_changes", "values", "errors", "_errors", "changes_valid"]
+    BUILT_IN_INST_ATTRS = [
+        "record_values",
+        "_record_values",
+        "changes",
+        "_changes",
+        "values",
+        "errors",
+        "_errors",
+        "changes_valid",
+    ]
 
     _schema_processed = False
 
@@ -40,10 +53,10 @@ class BasicModel(ABC):
         # If schema has already been processed (and no changes have been made since), do not process again
         if cls._schema_processed:
             return
-        
+
         # Prevent schema from being reprocessed unnecessarily
         cls._schema_processed = True
-        
+
         # Set class variables afresh whenever the schema is processed to ensure that methods defined on the class always
         # access the model's own unique copy of the variables instead of variables further up the class hierarchy
         cls._clear_model()
@@ -83,7 +96,7 @@ class BasicModel(ABC):
 
             field_names.append(name)
             count += 1
-        
+
         return field_names
 
     @classmethod
@@ -96,7 +109,7 @@ class BasicModel(ABC):
     def fields(cls):
         cls._process_schema()
         return MappingProxyType(cls._fields)
-    
+
     @classmethod
     @property
     def associations(cls):
@@ -128,17 +141,19 @@ class BasicModel(ABC):
             public_name = name[1:]
         else:
             public_name = name
-        
-        if (name not in dir(self) and 
-                name not in self.__class__.BUILT_IN_INST_ATTRS and 
-                public_name not in self.__class__.fields.keys() and 
-                public_name not in self.__class__.associations.keys()):
+
+        if (
+            name not in dir(self)
+            and name not in self.__class__.BUILT_IN_INST_ATTRS
+            and public_name not in self.__class__.fields.keys()
+            and public_name not in self.__class__.associations.keys()
+        ):
             raise AttributeError(
                 f"the schema for model '{self.__class__.__name__}' does not define a field '{public_name}'"
             )
 
         super(BasicModel, self).__setattr__(name, value)
-    
+
     def __getattribute__(self, name):
         if name.startswith("_") and not (name.startswith("__") and name.endswith("__")):
             public_name = name[1:]
@@ -151,7 +166,7 @@ class BasicModel(ABC):
             raise AttributeError(
                 f"the schema for model '{self.__class__.__name__}' does not define a field '{public_name}'"
             )
-        
+
     def __repr__(self):
         """Returns a code-like string representation of the model instance
 
@@ -163,8 +178,8 @@ class BasicModel(ABC):
 
         for field_name in repr_fields:
             field_value = str(getattr(self, field_name))
-            field_value = (field_value[:32] + '...') if len(field_value) > 32 else field_value
-            
+            field_value = (field_value[:32] + "...") if len(field_value) > 32 else field_value
+
             repr += f"{field_name}: {field_value}, "
             count += 1
 
@@ -178,19 +193,19 @@ class BasicModel(ABC):
         return repr
 
     def render(self, only=None):
-        data = { name: getattr(self, name) for name in self.__class__.fields.keys() }
+        data = {name: getattr(self, name) for name in self.__class__.fields.keys()}
 
         if only:
-            data = { name: data[name] for name in only }
+            data = {name: data[name] for name in only}
 
         return data
-    
+
     def clear_changes(self):
         self._changes.clear()
         self._errors.clear()
 
     def change(self, name, value):
-        if (name not in self.__class__.fields):
+        if name not in self.__class__.fields:
             raise UndefinedField(f"field '{name}' does not exist in model '{self.__class__.__name__}'")
 
         self._changes[name] = value
@@ -206,7 +221,7 @@ class BasicModel(ABC):
         elif getattr(type, "python_type", None):
             if not isinstance(value, field.type.python_type):
                 self._add_error(name, "is of an incorrect type")
-            
+
     def cast_changes(self, changes, permitted={}):
         for name, value in changes.items():
             if (name not in permitted) or (name not in self.__class__.fields):
@@ -226,7 +241,7 @@ class BasicModel(ABC):
     def _force_commit_changes(self):
         for name, value in self._changes.items():
             self._record_values[name] = value
-        
+
         self.clear_changes()
 
     def errors_for(self, field):
@@ -234,7 +249,7 @@ class BasicModel(ABC):
             self._errors[field] = list()
 
         return self._errors[field].copy()
-    
+
     def _add_error(self, field, msg):
         if not self._errors.get(field):
             self._errors[field] = list()
@@ -283,16 +298,16 @@ class BasicModel(ABC):
 
         if min and length < min:
             self._add_error(field, msg or f"should be at least {length} {element_type}(s)")
-        
+
         if max and length > max:
             self._add_error(field, msg or f"should be at most {length} {element_type}(s)")
 
     def validate_number(self, field, *expressions, msg=None):
         value = self.values.get(field)
-        
+
         if not value:
             return
-        
+
         for exp in expressions:
             if exp[0] == "<" and value >= exp[1]:
                 self._add_error(field, msg or f"must be less than {exp[1]}")
@@ -320,16 +335,16 @@ class BasicModel(ABC):
     @property
     def changes(self):
         return MappingProxyType(self._changes)
-    
+
     @property
     def values(self):
         return MappingProxyType({**self.record_values, **self.changes})
-    
+
     @property
     def errors(self):
-        errors = { field: errors for field, errors in self._errors.items() if len(errors) > 0 }
+        errors = {field: errors for field, errors in self._errors.items() if len(errors) > 0}
         return MappingProxyType(errors)
-    
+
     @property
     def changes_valid(self):
-        return (len(self.errors) == 0)
+        return len(self.errors) == 0

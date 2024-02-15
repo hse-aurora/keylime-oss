@@ -5,13 +5,12 @@ Revises: 21b5cb88fcdb
 Create Date: 2024-02-15 11:48:41.458971
 
 """
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = '330024be7bef'
-down_revision = '21b5cb88fcdb'
+revision = "330024be7bef"
+down_revision = "21b5cb88fcdb"
 branch_labels = None
 depends_on = None
 
@@ -22,9 +21,6 @@ def upgrade(engine_name):
 
 def downgrade(engine_name):
     globals()[f"downgrade_{engine_name}"]()
-
-
-
 
 
 def upgrade_registrar():
@@ -39,14 +35,14 @@ def upgrade_registrar():
             existing_type=sa.Integer,
             type_=sa.Boolean,
             existing_nullable=True,
-            postgresql_using="active::boolean"
+            postgresql_using="active::boolean",
         )
         batch_op.alter_column(
             "virtual",
             existing_type=sa.Integer,
             type_=sa.Boolean,
             existing_nullable=True,
-            postgresql_using="virtual::boolean"
+            postgresql_using="virtual::boolean",
         )
         # Certificates can easily be more than 2048 characters when Base64 encoded. SQLite does not enforce length
         # restrictions (VARCHAR(2048) = TEXT) which may have prevented this from being a problem in the past.
@@ -72,14 +68,14 @@ def downgrade_registrar():
             existing_type=sa.Boolean,
             type_=sa.Integer,
             existing_nullable=True,
-            postgresql_using="active::integer"
+            postgresql_using="active::integer",
         )
         batch_op.alter_column(
             "virtual",
             existing_type=sa.Boolean,
             type_=sa.Integer,
             existing_nullable=True,
-            postgresql_using="virtual::integer"
+            postgresql_using="virtual::integer",
         )
         batch_op.alter_column(
             "ekcert",
@@ -101,4 +97,3 @@ def upgrade_cloud_verifier():
 
 def downgrade_cloud_verifier():
     pass
-
