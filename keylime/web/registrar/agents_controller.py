@@ -54,7 +54,7 @@ class AgentsController(Controller):
         agent.delete()
         self.respond(200, "Success")
 
-    # POST /v2[.:minor]/agents/:agent_id/activate/
+    # POST /v2[.:minor]/agents/:agent_id/[activate]
     def activate(self, agent_id, auth_tag, **params):
         agent = RegistrarAgent.get(agent_id)
 

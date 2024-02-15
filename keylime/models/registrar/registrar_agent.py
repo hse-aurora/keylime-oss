@@ -76,8 +76,15 @@ class RegistrarAgent(PersistableModel):
     def _prepare_status_flags(self):
         self.virtual = self.ekcert == "virtual"
 
-        if ("ek_tpm", "ekcert", "aik_tpm", "iak_tpm", "idevid_tpm") in self.changes:
+        if any(field in ("ek_tpm", "ekcert", "aik_tpm", "iak_tpm", "idevid_tpm") for field in self.changes):
             self.active = False
+
+    def _prepare_regcount(self):
+        if self.regcount == None:
+            self.regcount = 0
+
+        if any(field in ("ek_tpm", "ekcert", "aik_tpm", "iak_tpm", "idevid_tpm") for field in self.changes):
+            self.regcount += 1
 
     def update(self, data):
         # Bind key-value pairs ('data') to those fields which are meant to be externally changeable
@@ -91,6 +98,8 @@ class RegistrarAgent(PersistableModel):
         self._prepare_iak_idevid()
         # Determine and set 'virtual' and 'active' flags
         self._prepare_status_flags()
+        # Increment number of registrations
+        self._prepare_regcount()
 
         # Validate values
         self.validate_required(["ek_tpm", "aik_tpm"])
