@@ -2,8 +2,6 @@ from keylime import keylime_logging
 from keylime.models import RegistrarAgent
 from keylime.web.base import Controller
 
-logger = keylime_logging.init_logging("registrar")
-
 
 class AgentsController(Controller):
     # GET /v2[.:minor]/agents/
@@ -63,11 +61,15 @@ class AgentsController(Controller):
             return
 
         accepted = agent.verify_ak_response(auth_tag)
-        agent.commit_changes()
-        self.respond(200, "Success")
 
-        if not accepted:
-            logger.warning(
-                f"Auth tag '{auth_tag}' for agent '{agent_id}' does not match expected value. It will need to be "
-                f"restarted in order to reattempt registration."
+        if accepted:
+            agent.commit_changes()
+            self.respond(200, "Success")
+        else:
+            agent.delete()
+
+            self.respond(
+                400,
+                f"Auth tag '{auth_tag}' for agent '{agent_id}' does not match expected value. The agent has been "
+                f"deleted from the database and will need to be restarted to reattempt registration",
             )
