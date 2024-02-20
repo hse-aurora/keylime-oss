@@ -5,7 +5,7 @@ import tornado.process
 
 from keylime import config, keylime_logging
 from keylime.common.migrations import apply
-from keylime.models import db_manager
+from keylime.models import da_manager, db_manager
 from keylime.web import RegistrarServer
 
 logger = keylime_logging.init_logging("registrar")
@@ -40,6 +40,8 @@ def main() -> None:
     _check_devid_requirements()
     # Prepare to use the registrar database
     db_manager.make_engine("registrar")
+    # Prepare backend for durable attestation, if configured
+    da_manager.make_backend("registrar")
 
     # Start HTTP server
     server = RegistrarServer()

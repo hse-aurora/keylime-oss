@@ -24,8 +24,12 @@ class RegistrarAgent(PersistableModel):
         cls._field("aik_tpm", String(500))
         # The initial attestation key (IAK) used when registering with a DevID
         cls._field("iak_tpm", String(500))
-        # The signing key used as DevID
+        # The initial attestation key (IAK) certificate used to verify IAK authenticity
+        cls._field("iak_cert", Text, nullable=True)
+        # The signing key used as initial device identity (IDevID) key
         cls._field("idevid_tpm", String(500))
+        # The initial device identity (IDevID) certificate used to verify IDevID authenticity
+        cls._field("idevid_cert", Text, nullable=True)
         # The HMAC key used to verify the response produced by TPM2_ActivateCredential to bind the AK to the EK
         cls._field("key", String(45))
         # Indicates that the AK has successfully been bound to the EK
@@ -105,6 +109,12 @@ class RegistrarAgent(PersistableModel):
         self.validate_required(["ek_tpm", "aik_tpm"])
         self.validate_base64(["ek_tpm", "ekcert", "aik_tpm", "iak_tpm", "idevid_tpm"])
 
+    def commit_changes(self):
+        if da_manager.backend:
+            da_manager.backend.record_create(super().render(), None, None)
+
+        return super().commit_changes()
+
     def produce_ak_challenge(self):
         ek_tpm = base64.b64decode(self.ek_tpm)
         aik_tpm = base64.b64decode(self.aik_tpm)
@@ -134,7 +144,7 @@ class RegistrarAgent(PersistableModel):
 
     def render(self, only=None):
         if not only:
-            only = ["ek_tpm", "ekcert", "aik_tpm", "mtls_cert", "ip", "port", "regcount"]
+            only = ["agent_id", "ek_tpm", "ekcert", "aik_tpm", "mtls_cert", "ip", "port", "regcount"]
 
             if self.virtual:
                 only.append("provider_keys")
