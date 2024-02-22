@@ -1,8 +1,9 @@
 import base64
 
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-from keylime import cert_utils, crypto
+from keylime import cert_utils, config, crypto
 from keylime.db.registrar_db import JSONPickleType
 from keylime.json import JSONPickler
 from keylime.models.base import *
@@ -53,41 +54,139 @@ class RegistrarAgent(PersistableModel):
         agent.provider_keys = {}
         return agent
 
-    def _prepare_ek(self):
-        ekcert = self.changes.get("ekcert")
+    def _check_key_against_cert(self, tpm_key_field, cert_field, empty_values=(None,)):
+        tpm_key = self.changes.get(tpm_key_field)
+        cert = self.changes.get(cert_field)
 
-        if ekcert in (None, "emulator"):
+        # If key or certificate is not present in the pending changes, skip checking the key against the certificate
+        if tpm_key in (None, *empty_values) or cert in (None, *empty_values):
             return
 
+        # Convert TPM key to a public key object
         try:
-            cert = cert_utils.x509_der_cert(base64.b64decode(ekcert, validate=True))
-            ek_pub = cert.public_key()
+            tpm_pub = tpm2_objects.pubkey_from_tpm2b_public(base64.b64decode(tpm_key))
+            tpm_pub_bytes = tpm_pub.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
         except:
-            self._add_error("ekcert", "must be a valid binary X.509 certificate encoded in Base64")
+            self._add_error(tpm_key_field, "must be a valid TPM2B_PUBLIC structure")
             return
 
-        if not isinstance(ek_pub, (rsa.RSAPublicKey, ec.EllipticCurvePublicKey)):
-            self._add_error("ekcert", "must contain a valid RSA or EC public key")
+        # Make sure that the TPM key is either an RSA or EC public key
+        if not isinstance(tpm_pub, (rsa.RSAPublicKey, ec.EllipticCurvePublicKey)):
+            self._add_error(tpm_key_field, "must contain a valid RSA or EC public key")
             return
 
-        ek_tpm = base64.b64encode(tpm2_objects.ek_low_tpm2b_public_from_pubkey(ek_pub)).decode("utf-8")
-        self.change("ek_tpm", ek_tpm)
+        # Parse X.509 certificate and extract public key
+        try:
+            cert = cert_utils.x509_der_cert(base64.b64decode(cert, validate=True))
+            cert_pub = cert.public_key()
+            cert_pub_bytes = cert_pub.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
+        except:
+            self._add_error(cert_field, "must be a valid binary X.509 certificate encoded in Base64")
+            return
 
-    def _prepare_iak_idevid(self):
-        # TODO: Add code to process IAK/IDevID
-        return True
+        # Check that the public key obtained from the TPM matches the public key contained in the certificate
+        if tpm_pub_bytes != cert_pub_bytes:
+            self._add_error(tpm_key_field, f"must contain the same public key found in {cert_field}")
+            return
+
+    def _check_cert_trust_status(self, cert_field):
+        cert = self.changes.get(cert_field)
+
+        if not cert:
+            return
+
+        # This is the directory currently used to trust IAK/IDevID certificates but this will be replaced with a
+        # more robust trust store implementation in a subsequent PR
+        trust_store = config.get("tenant", "tpm_cert_store")
+
+        if not cert_utils.verify_cert(cert, trust_store):
+            self._add_error("iak_cert", "must contain a certificate issued by a CA present in the trust store")
+
+    def _bind_ak_to_iak(self, iak_attest, iak_sign):
+        # The ak-iak binding should only be verified if either aik_tpm or iak_tpm is changed
+        if "aik_tpm" not in self.changes or "iak_tpm" not in self.changes:
+            return
+
+        # If one of aik_tpm or iak_tpm is missing from the record, the ak-iak binding cannot be verified so skip
+        if not self.aik_tpm or not self.iak_tpm:
+            return
+
+        # If the iak_attest and iak_sign values are missing, treat this as an error
+        if not iak_attest or not iak_sign:
+            self._add_error("aik_tpm", "cannot be bound to the IAK because of a missing 'iak_attest' or 'iak_sign'")
+
+        # Decode Base64 values to binary TPM structures
+        aik_tpm = base64.b64decode(self.aik_tpm)
+        iak_tpm = base64.b64decode(self.iak_tpm)
+        iak_attest = base64.b64decode(iak_attest)
+        iak_sign = base64.b64decode(iak_sign)
+
+        # Verify that iak_attest properly contains reference to aik_tpm and that iak_sign is a signature thereover
+        # produced by the private key corresponding to iak_tpm
+        if not Tpm.verify_aik_with_iak(self.agent_id, aik_tpm, iak_tpm, iak_attest, iak_sign):
+            self._add_error("aik_tpm", "cannot be confirmed as having been created by the same TPM as the IAK")
+
+    def _check_ek(self):
+        # Check that the EK public keys from the TPM match the public keys contained in the EK certificate
+        self._check_key_against_cert("ek_tpm", "ekcert", empty_values=(None, "emulator"))
+
+        # The current behaviour of the registrar is not to perform any verification of the EK certificate against
+        # trusted TPM manufacturer certificates. This responsibility is left to the tenant. A future PR will add
+        # a trust store to the registrar at which point the below line will be uncommented
+        #
+        ## self._check_cert_trust_status("ek_cert")
+
+        # Note: The AK cannot be verified as bound to the EK until the agent receives a challenge and uses the TPM
+        # to produce a response (see the self.produce_ak_challenge() and self.verify_ak_response(response) methods).
+
+    def _check_iak_idevid(self, iak_attest, iak_sign):
+        # Check that the IAK/IDevID public keys from the TPM match the public keys contained in the IAK/IDevID certs
+        self._check_key_against_cert("iak_tpm", "iak_cert")
+        self._check_key_against_cert("idevid_tpm", "idevid_cert")
+        # Check that the IAK/IDevID certificates are trusted
+        self._check_cert_trust_status("iak_cert")
+        self._check_cert_trust_status("idevid_cert")
+        # Check that the AK is bound to the IAK by way of TPM2_Certify
+        self._bind_ak_to_iak(iak_attest, iak_sign)
+
+    def _check_root_identity_presence(self):
+        tpm_identity = config.get("registrar", "tpm_identity", fallback="default")
+
+        if tpm_identity == "iak_idevid":
+            self.validate_required(["iak_tpm", "idevid_tpm"], msg="is required by configuration")
+        elif tpm_identity == "ek_cert":
+            self.validate_required(["ek_tpm"], msg="is required by configuration")
+        else:
+            # If tpm_identity == "default" or tpm_identity == "ek_cert_or_iak_idevid" then either EK or IAK/IDevID is
+            # allowed as the root identity, so check that either one or the other is present:
+
+            if not self.iak_tpm and not self.ek_tpm:
+                self._add_error("iak_tpm", "is required in absence of an EK")
+
+            if not self.idevid_tpm and not self.ek_tpm:
+                self._add_error("idevid_tpm", "is required in absence of an EK")
+
+            if not self.ek_tpm and not self.iak_tpm and not self.idevid_tpm:
+                self._add_error("ek_tpm", "is required in absence of an IAK and IDevID")
+
+        # If an IAK/IDevID is provided, ensure that IAK/IDevID certificates are also present. This requirement will be
+        # dropped when IAK/IDevID registration without including certs is enabled (when web hook functionality is added)
+        if "iak_tpm" in self.changes or "idevid_tpm" in self.changes:
+            self.validate_required(["iak_cert", "idevid_cert"])
 
     def _prepare_status_flags(self):
         self.virtual = self.ekcert == "virtual"
 
-        if any(field in ("ek_tpm", "ekcert", "aik_tpm", "iak_tpm", "idevid_tpm") for field in self.changes):
+        if "ek_tpm" in self.changes or "aik_tpm" in self.changes:
             self.active = False
 
     def _prepare_regcount(self):
+        reg_fields = ("ek_tpm", "ekcert", "aik_tpm", "iak_tpm", "iak_cert", "idevid_tpm", "idevid_cert")
+
         if self.regcount == None:
             self.regcount = 0
 
-        if any(field in ("ek_tpm", "ekcert", "aik_tpm", "iak_tpm", "idevid_tpm") for field in self.changes):
+        if any(field in reg_fields for field in self.changes) and self.changes_valid:
             self.regcount += 1
 
     def update(self, data):
@@ -96,18 +195,22 @@ class RegistrarAgent(PersistableModel):
             data, ["agent_id", "ek_tpm", "ekcert", "aik_tpm", "iak_tpm", "idevid_tpm", "ip", "port", "mtls_cert"]
         )
 
-        # Extract public EK from EK cert if possible
-        self._prepare_ek()
-        # Extract public IAK/IDevID from IAK/DevID certs if possible
-        self._prepare_iak_idevid()
+        # Verify EK as valid
+        self._check_ek()
+        # Verify IAK/IDevID as valid and trusted
+        self._check_iak_idevid(data.get("iak_attest"), data.get("iak_sign"))
+        # Ensure either an EK or IAK/IDevID is present, depending on configuration
+        self._check_root_identity_presence()
+
+        # Basic validation of values
+        self.validate_required(["aik_tpm"])
+        self.validate_base64(["ek_tpm", "ekcert", "aik_tpm", "iak_tpm", "iak_cert", "idevid_tpm", "idevid_cert"])
+        self.validate_base64(["mtls_cert"])
+
         # Determine and set 'virtual' and 'active' flags
         self._prepare_status_flags()
-        # Increment number of registrations
+        # Increment number of registrations if appropriate
         self._prepare_regcount()
-
-        # Validate values
-        self.validate_required(["ek_tpm", "aik_tpm"])
-        self.validate_base64(["ek_tpm", "ekcert", "aik_tpm", "iak_tpm", "idevid_tpm"])
 
     def commit_changes(self):
         if da_manager.backend:
@@ -116,6 +219,9 @@ class RegistrarAgent(PersistableModel):
         return super().commit_changes()
 
     def produce_ak_challenge(self):
+        if not self.ek_tpm or not self.aik_tpm:
+            return None
+
         ek_tpm = base64.b64decode(self.ek_tpm)
         aik_tpm = base64.b64decode(self.aik_tpm)
 
@@ -123,11 +229,9 @@ class RegistrarAgent(PersistableModel):
             result = Tpm.encrypt_aik_with_ek(self.agent_id, ek_tpm, aik_tpm)
 
             if not result:
-                self._add_error("ek_tpm", "is not a valid TPM public key")
                 return None
 
         except ValueError:
-            self._add_error("aik_tpm", "is not a valid TPM public key")
             return None
 
         (challenge, key) = result

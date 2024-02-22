@@ -1,4 +1,3 @@
-from keylime import keylime_logging
 from keylime.models import RegistrarAgent
 from keylime.web.base import Controller
 
@@ -31,7 +30,7 @@ class AgentsController(Controller):
         challenge = agent.produce_ak_challenge()
 
         if not challenge:
-            self.respond(400, "Could not register agent because an invalid EK or AK was provided")
+            self.respond(400, "Could not register agent because the EK or AK was missing or invalid")
             return
 
         if not agent.changes_valid:
