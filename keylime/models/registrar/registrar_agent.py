@@ -89,7 +89,7 @@ class RegistrarAgent(PersistableModel):
             self._add_error(tpm_key_field, f"must contain the same public key found in {cert_field}")
             return
 
-    def _check_cert_trust_status(self, cert_field):
+    def _check_cert_trust_status(self, cert_field, cert_type=""):
         cert = self.changes.get(cert_field)
 
         if not cert:
@@ -99,8 +99,8 @@ class RegistrarAgent(PersistableModel):
         # more robust trust store implementation in a subsequent PR
         trust_store = config.get("tenant", "tpm_cert_store")
 
-        if not cert_utils.verify_cert(cert, trust_store):
-            self._add_error("iak_cert", "must contain a certificate issued by a CA present in the trust store")
+        if not cert_utils.verify_cert(cert, trust_store, cert_type):
+            self._add_error(cert_field, "must contain a certificate issued by a CA present in the trust store")
 
     def _bind_ak_to_iak(self, iak_attest, iak_sign):
         # The ak-iak binding should only be verified if either aik_tpm or iak_tpm is changed
@@ -144,8 +144,8 @@ class RegistrarAgent(PersistableModel):
         self._check_key_against_cert("iak_tpm", "iak_cert")
         self._check_key_against_cert("idevid_tpm", "idevid_cert")
         # Check that the IAK/IDevID certificates are trusted
-        self._check_cert_trust_status("iak_cert")
-        self._check_cert_trust_status("idevid_cert")
+        self._check_cert_trust_status("iak_cert", "IAK")
+        self._check_cert_trust_status("idevid_cert", "IDevID")
         # Check that the AK is bound to the IAK by way of TPM2_Certify
         self._bind_ak_to_iak(iak_attest, iak_sign)
 
