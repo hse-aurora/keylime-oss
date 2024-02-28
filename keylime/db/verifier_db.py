@@ -1,8 +1,11 @@
-from sqlalchemy import Column, ForeignKey, Integer, LargeBinary, PickleType, String, Text, schema
+from sqlalchemy import Column, ForeignKey, Integer, LargeBinary, PickleType, String, Text, schema, Enum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
+import time
 
 from keylime.json import JSONPickler
+
+from keylime.attestationstatus import AttestationStatusEnum
 
 Base = declarative_base()
 
@@ -50,6 +53,7 @@ class VerfierMain(Base):
     last_received_quote = Column(Integer)
     last_successful_attestation = Column(Integer)
     tpm_clockinfo = Column(JSONPickleType(pickler=JSONPickler))
+    attestation_details= relationship("VerifierAttestations", back_populates="agent")
 
 
 class VerifierAllowlist(Base):
@@ -62,3 +66,22 @@ class VerifierAllowlist(Base):
     generator = Column(Integer)
     tpm_policy = Column(Text())
     ima_policy = Column(Text().with_variant(Text(429400000), "mysql"))
+
+
+class VerifierAttestations(Base):
+    __tablename__ = "attestations"
+    agent = relationship("VerfierMain", back_populates="attestation_details")
+    agent_id = Column(String(80),  ForeignKey("verifiermain.agent_id"), primary_key=True)
+    nonce = Column(String(20))
+    #nonce_created = Column(Integer, server_default=time.time())
+    nonce_created = Column(Integer)
+    nonce_expires = Column(Integer)
+    status = Column(Enum(AttestationStatusEnum), server_default=AttestationStatusEnum.PENDING.value)
+    quote = Column(String(80))
+    quote_received = Column(Integer)
+    pcrs = Column(Text)
+    next_ima_offset = Column(Integer)
+    uefi_logs = Column(Text)
+    hash_alg = Column(String(10))
+    enc_alg = Column(String(10))
+    sign_alg = Column(String(10))
