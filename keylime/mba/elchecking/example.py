@@ -184,6 +184,8 @@ class Example(policies.Policy):
         )
         # We only expect one EV_NO_ACTION event at the start.
         dispatcher.set((0, "EV_NO_ACTION"), tests.OnceTest(tests.AcceptAll()))
+        dispatcher.set((1, "EV_CPU_MICROCODE"), tests.OnceTest(tests.AcceptAll()))
+        dispatcher.set((1, "EV_EFI_HANDOFF_TABLES2"), tests.OnceTest(tests.AcceptAll()))
         dispatcher.set((0, "EV_S_CRTM_VERSION"), events_final.get("s_crtms"))
         dispatcher.set((0, "EV_EFI_PLATFORM_FIRMWARE_BLOB"), events_final.get("platform_firmware_blobs"))
         dispatcher.set((7, "EV_EFI_VARIABLE_DRIVER_CONFIG"), vd_driver_config)
@@ -229,8 +231,14 @@ class Example(policies.Policy):
         )
         db_test = tests.OnceTest(
             tests.Or(
-                tests.KeySubset("a159c0a5-e494-a74a-87b5-ab155c2bf072", sigs_strip0x(refstate["db"])),
-                tests.KeySubset("a5c059a1-94e4-4aa7-87b5-ab155c2bf072", sigs_strip0x(refstate["db"])),
+                tests.KeySubsetMulti(
+                    ["a159c0a5-e494-a74a-87b5-ab155c2bf072", "2616c4c1-4c50-9240-aca9-41f936934328"],
+                    sigs_strip0x(refstate["db"]),
+                ),
+                tests.KeySubsetMulti(
+                    ["a5c059a1-94e4-4aa7-87b5-ab155c2bf072", "c1c41626-504c-4092-aca9-41f936934328"],
+                    sigs_strip0x(refstate["db"]),
+                ),
             )
         )
         vd_driver_config.set(
@@ -285,6 +293,7 @@ class Example(policies.Policy):
                 )
             ),
         )
+        vd_authority.set("605dab50-e046-4300-abb6-3dd810dd8b23", "MokListRT", tests.OnceTest(tests.AcceptAll()))
 
         # A list of allowed digests for firmware from device driver appears
         # in PCR2, event type EV_EFI_BOOT_SERVICES_DRIVER. Here we will just
@@ -378,6 +387,7 @@ class Example(policies.Policy):
             ),
         )
         dispatcher.set((5, "EV_EFI_ACTION"), tests.EvEfiActionTest(5))
+        dispatcher.set((1, "EV_EFI_ACTION"), tests.EvEfiActionTest(1))
         # Accept all UEFI_GPT_DATA. We only expect one entry for that.
         dispatcher.set((5, "EV_EFI_GPT_EVENT"), tests.OnceTest(tests.AcceptAll()))
         events_test = tests.FieldTest(

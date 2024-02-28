@@ -1,12 +1,9 @@
 import configparser
 import importlib
+import logging
 import os
-import sys
 import tempfile
 import unittest
-from contextlib import contextmanager
-from io import StringIO
-from typing import Generator, Tuple
 
 from keylime.cmd import convert_config
 
@@ -15,17 +12,6 @@ CONFIG_DIR = os.path.abspath(os.path.join(DATA_DIR, "config"))
 TEMPLATES_DIR = os.path.abspath(os.path.join(DATA_DIR, "templates"))
 MAPPINGS_DIR = os.path.abspath(os.path.join(DATA_DIR, "mappings"))
 COMPONENTS = ["comp1", "comp2"]
-
-
-@contextmanager
-def captured_output() -> Generator[Tuple[StringIO, StringIO], None, None]:
-    new_out, new_err = StringIO(), StringIO()
-    old_out, old_err = sys.stdout, sys.stderr
-    try:
-        sys.stdout, sys.stderr = new_out, new_err
-        yield sys.stdout, sys.stderr
-    finally:
-        sys.stdout, sys.stderr = old_out, old_err
 
 
 class TestConvertConfig(unittest.TestCase):
@@ -202,8 +188,9 @@ class TestConvertConfig(unittest.TestCase):
         # Use sanity mapping (default)
         mapping = os.path.join(MAPPINGS_DIR, "sanity.json")
 
-        with captured_output() as (out, _):
-            result = convert_config.process_mapping(COMPONENTS, config, TEMPLATES_DIR, mapping)
+        with self.assertLogs("process_mapping", level="DEBUG") as cm:
+            l = logging.getLogger("process_mapping")
+            result = convert_config.process_mapping(COMPONENTS, config, TEMPLATES_DIR, mapping, logger=l)
 
         self.assertTrue(isinstance(result, configparser.RawConfigParser))
 
@@ -222,7 +209,9 @@ class TestConvertConfig(unittest.TestCase):
 
         # Check that when the component does not have a version, the smallest
         # number is used
-        self.assertTrue("No version found in old configuration for comp1, using '1.0'" in out.getvalue())
+        self.assertTrue(
+            "DEBUG:process_mapping:No version found in old configuration for comp1, using '1.0'" in cm.output
+        )
 
     def test_process_non_existing_mapping(self) -> None:
         """Check that non-existing mapping raises Exception"""
@@ -259,11 +248,13 @@ class TestConvertConfig(unittest.TestCase):
         config["comp2"]["version"] = "3.0"
         mapping = os.path.join(MAPPINGS_DIR, "sanity.json")
 
-        with captured_output() as (out, _):
-            result = convert_config.process_mapping(COMPONENTS, config, TEMPLATES_DIR, mapping)
+        with self.assertLogs("already_updated", level="DEBUG") as cm:
+            l = logging.getLogger("already_updated")
+            result = convert_config.process_mapping(COMPONENTS, config, TEMPLATES_DIR, mapping, logger=l)
             self.assertEqual(result, config)
+
         # Check that the output shows that the updated version was skipped
-        self.assertTrue("Skipping version 3.0" in out.getvalue())
+        self.assertTrue("INFO:already_updated:Skipping version 3.0" in cm.output)
 
     def test_process_mapping_missing_version(self) -> None:
         """Check that missing version in templates directory raises exception"""
@@ -423,3 +414,227 @@ class TestConvertConfig(unittest.TestCase):
             self.assertEqual(result.get("comp1", "test_option"), "current")
             self.assertEqual(result.get("comp1", "test_adjust"), "adjusted 3.0")
             self.assertEqual(result.get("subcomp1", "suboption"), "current")
+
+    def test_update_add(self) -> None:
+        """Test mapping update adding options"""
+        # Use default configuration files
+        config = configparser.RawConfigParser()
+        config.add_section("comp1")
+        config["comp1"]["version"] = "3.0"
+        config["comp1"]["unused_option"] = "unused"
+        config.add_section("subcomp1")
+        config["subcomp1"]["unused_option"] = "unused"
+        config.add_section("comp2")
+        config["comp2"]["version"] = "3.0"
+        config["comp2"]["unused_option"] = "unused"
+        config.add_section("subcomp2")
+        config["subcomp2"]["unused_option"] = "unused"
+
+        template = os.path.join(DATA_DIR, "templates-update-add")
+        self.assertTrue(os.path.exists(template))
+
+        result = convert_config.process_versions(COMPONENTS, template, config)
+
+        # Check that the new options were properly added
+        self.assertTrue("added_option" in result["comp1"])
+        self.assertTrue("added_option" in result["subcomp1"])
+        self.assertTrue("added_option" in result["comp2"])
+        self.assertTrue("added_option" in result["subcomp2"])
+
+        # Check that the version of the components were updated
+        self.assertEqual("3.1", result.get("comp1", "version"))
+        self.assertEqual("3.1", result.get("subcomp1", "version"))
+        self.assertEqual("3.1", result.get("comp2", "version"))
+        self.assertEqual("3.1", result.get("subcomp2", "version"))
+
+    def test_update_remove(self) -> None:
+        """Test mapping update removing options"""
+        config = configparser.RawConfigParser()
+        config.add_section("comp1")
+        config["comp1"]["version"] = "1.0"
+        config["comp1"]["unused_option"] = "unused"
+        config.add_section("subcomp1")
+        config["subcomp1"]["version"] = "1.0"
+        config["subcomp1"]["unused_option"] = "unused"
+        config.add_section("comp2")
+        config["comp2"]["version"] = "1.0"
+        config["comp2"]["unused_option"] = "unused"
+        config.add_section("subcomp2")
+        config["subcomp2"]["version"] = "1.0"
+        config["subcomp2"]["unused_option"] = "unused"
+
+        template = os.path.join(DATA_DIR, "templates-update-remove")
+        self.assertTrue(os.path.exists(template))
+
+        result = convert_config.process_versions(COMPONENTS, template, config)
+
+        # Check that options were removed from the result
+        self.assertTrue("unused_option" not in result["comp1"])
+        self.assertTrue("unused_option" not in result["subcomp1"])
+        self.assertTrue("unused_option" not in result["comp2"])
+        self.assertTrue("unused_option" not in result["subcomp2"])
+
+        # Check that the versions of the components were updated
+        self.assertEqual("3.1", result.get("comp1", "version"))
+        self.assertEqual("3.1", result.get("subcomp1", "version"))
+        self.assertEqual("3.1", result.get("comp2", "version"))
+        self.assertEqual("3.1", result.get("subcomp2", "version"))
+
+    def test_update_replace(self) -> None:
+        """Test mapping update replacing options"""
+        config = configparser.RawConfigParser()
+        config.add_section("comp1")
+        config["comp1"]["version"] = "1.0"
+        config["comp1"]["old_option"] = "old_value"
+        config.add_section("subcomp1")
+        config["subcomp1"]["version"] = "1.0"
+        config["subcomp1"]["old_option"] = "old_value"
+        config.add_section("comp2")
+        config["comp2"]["version"] = "1.0"
+        config["comp2"]["old_option"] = "old_value"
+        config.add_section("subcomp2")
+        config["subcomp2"]["version"] = "1.0"
+        config["subcomp2"]["old_option"] = "old_value"
+
+        template = os.path.join(DATA_DIR, "templates-update-replace")
+        self.assertTrue(os.path.exists(template))
+
+        result = convert_config.process_versions(COMPONENTS, template, config)
+
+        # Check that options with the old name are not present
+        self.assertTrue("old_option" not in result["comp1"])
+        self.assertTrue("old_option" not in result["subcomp1"])
+        self.assertTrue("old_option" not in result["comp2"])
+        self.assertTrue("old_option" not in result["subcomp2"])
+
+        # Check that options with the new name are present
+        self.assertTrue("new_option" in result["comp1"])
+        self.assertTrue("new_option" in result["subcomp1"])
+        self.assertTrue("new_option" in result["comp2"])
+        self.assertTrue("new_option" in result["subcomp2"])
+
+        # Check that the values of the options were kept
+        self.assertEqual("old_value", result.get("comp1", "new_option"))
+        self.assertEqual("old_value", result.get("subcomp1", "new_option"))
+        self.assertEqual("old_value", result.get("comp2", "new_option"))
+        self.assertEqual("old_value", result.get("subcomp2", "new_option"))
+
+        # Check that the version of the components were updated
+        self.assertEqual("3.1", result.get("comp1", "version"))
+        self.assertEqual("3.1", result.get("subcomp1", "version"))
+        self.assertEqual("3.1", result.get("comp2", "version"))
+        self.assertEqual("3.1", result.get("subcomp2", "version"))
+
+    def test_update_mixed_corner_cases(self) -> None:
+        """Test some corner cases on update"""
+
+        config = configparser.RawConfigParser()
+        config.add_section("comp1")
+        config["comp1"]["version"] = "1.0"
+        config["comp1"]["existing_option"] = "old_value"
+        config["comp1"]["other_existing"] = "old_value"
+        config["comp1"]["to_replace"] = "old_value"
+
+        template = os.path.join(DATA_DIR, "templates-update-corner-cases")
+        self.assertTrue(os.path.exists(template))
+
+        with self.assertLogs("corner_cases", level="DEBUG") as cm:
+            l = logging.getLogger("corner_cases")
+            result = convert_config.process_versions(COMPONENTS, template, config, logger=l)
+
+        # Check that adding existing option does not choke the update and the old
+        # value is preserved
+        self.assertTrue(
+            'DEBUG:corner_cases:[comp1]: Skipped adding already existing option "existing_option"' in cm.output
+        )
+        self.assertEqual("old_value", result.get("comp1", "existing_option"))
+
+        # Check that removing non-existing options does not choke the processing
+        self.assertTrue(
+            'DEBUG:corner_cases:[comp1]: Skipped removing unexisting option "non_existing_option"' in cm.output
+        )
+
+        # Check that replacing an option with an already existing option results
+        # on the replaced option removed and existing option value preserved
+        self.assertTrue('DEBUG:corner_cases:[comp1]: Skipped removing unexisting option "non_existing"' in cm.output)
+        self.assertEqual("old_value", result.get("comp1", "other_existing"))
+
+        # Check that replacing non-existing option results in option added with
+        # default value
+        self.assertTrue('DEBUG:corner_cases:[comp1]: Skipped removing unexisting option "non_existing"' in cm.output)
+        self.assertEqual("new_value", result.get("comp1", "non_existing_replacement"))
+
+        # Check that new sections and options are added correctly
+        self.assertTrue('INFO:corner_cases:Added new section "[new_comp]"' in cm.output)
+        self.assertTrue('DEBUG:corner_cases:[new_comp]: Added new option "new_option" = "new_value"' in cm.output)
+        self.assertEqual("new_value", result.get("new_comp", "new_option"))
+
+        # Check that bogus operations in new sections generate warnings
+        self.assertTrue('WARNING:corner_cases:Bogus "remove" operation in new section "[new_comp]"' in cm.output)
+        self.assertTrue('WARNING:corner_cases:Bogus "replace" operation in new section "[new_comp]"' in cm.output)
+
+    def test_update_invalid_mapping_type(self) -> None:
+        """Test that invalid mapping type causes an exception to be raised"""
+
+        config = configparser.RawConfigParser()
+        config.add_section("comp1")
+        config["comp1"]["version"] = "1.0"
+        config["comp1"]["option"] = "old_value"
+
+        template = os.path.join(DATA_DIR, "templates-invalid-mapping-type")
+        self.assertRaises(Exception, convert_config.process_versions, COMPONENTS, template, config)
+
+    def test_update_invalid_mapping_version(self) -> None:
+        """Test that invalid version causes an exception to be raised"""
+
+        config = configparser.RawConfigParser()
+        config.add_section("comp1")
+        config["comp1"]["version"] = "1.0"
+        config["comp1"]["option"] = "old_value"
+
+        template = os.path.join(DATA_DIR, "templates-invalid-mapping-version")
+        self.assertRaises(Exception, convert_config.process_versions, COMPONENTS, template, config)
+
+    def test_update_invalid_component_version(self) -> None:
+        """Test that invalid version causes an exception to be raised"""
+
+        config = configparser.RawConfigParser()
+        config.add_section("comp1")
+        config["comp1"]["version"] = "invalid_version"
+        config["comp1"]["option"] = "old_value"
+
+        template = os.path.join(DATA_DIR, "templates-update-corner-cases")
+        self.assertRaises(Exception, convert_config.process_versions, COMPONENTS, template, config)
+
+    def test_update_missing_section(self) -> None:
+        """Test that missing section in replace causes an exception to be raised"""
+
+        config = configparser.RawConfigParser()
+        config.add_section("comp1")
+        config["comp1"]["version"] = "1.0"
+        config["comp1"]["option"] = "old_value"
+
+        template = os.path.join(DATA_DIR, "templates-update-missing-section")
+        self.assertRaises(Exception, convert_config.process_versions, COMPONENTS, template, config)
+
+    def test_update_missing_option(self) -> None:
+        """Test that missing option in replace causes an exception to be raised"""
+
+        config = configparser.RawConfigParser()
+        config.add_section("comp1")
+        config["comp1"]["version"] = "1.0"
+        config["comp1"]["option"] = "old_value"
+
+        template = os.path.join(DATA_DIR, "templates-update-missing-option")
+        self.assertRaises(Exception, convert_config.process_versions, COMPONENTS, template, config)
+
+    def test_update_missing_default(self) -> None:
+        """Test that missing default in replace causes an exception to be raised"""
+
+        config = configparser.RawConfigParser()
+        config.add_section("comp1")
+        config["comp1"]["version"] = "1.0"
+        config["comp1"]["option"] = "old_value"
+
+        template = os.path.join(DATA_DIR, "templates-update-missing-default")
+        self.assertRaises(Exception, convert_config.process_versions, COMPONENTS, template, config)
