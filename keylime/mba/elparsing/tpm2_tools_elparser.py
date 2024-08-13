@@ -30,6 +30,10 @@ def bootlog_parse(
     failure = Failure(Component.MEASURED_BOOT, ["parser"])
     if mb_measurement_list:
         failure_mb, mb_measurement_data = _parse_bootlog(mb_measurement_list)
+        # TODO remove this added for debug
+        failure.merge(failure_mb)
+        #print("\n\n*****failure_mb_from_elparser:", failure.get_event_ids())
+        #print("\n\nmb_measurement_data_from_elparser:", mb_measurement_data)
         if not mb_measurement_data:
             failure.merge(failure_mb)
             logger.error("Unable to parse measured boot event log. Check previous messages for a reason for error.")
@@ -61,8 +65,11 @@ def _parse_bootlog(log_b64: str) -> typing.Tuple[Failure, typing.Optional[Dict[s
     The output is the result of parsing and applying other conveniences."""
     failure = Failure(Component.MEASURED_BOOT, ["parser"])
     log_bin = base64.b64decode(log_b64, validate=True)
+    #debug
+    #print("\n\n****log_bin:",log_bin)
     try:
         failure_mb, result = parse_binary_bootlog(log_bin)
+        #print("\n\n****result_log_bin:",result)
         if failure_mb:
             failure.merge(failure_mb)
             result = None
@@ -77,11 +84,17 @@ def parse_binary_bootlog(log_bin: bytes) -> typing.Tuple[Failure, typing.Optiona
     The input is the binary log.
     The output is the result of parsing and applying other conveniences."""
     failure = Failure(Component.MEASURED_BOOT, ["parser"])
-    with tempfile.NamedTemporaryFile() as log_bin_file:
+    #with tempfile.NamedTemporaryFile() as log_bin_file:
+    with open("/tmp/test","wb") as log_bin_file:
         log_bin_file.write(log_bin)
         log_bin_file.seek(0)
         log_bin_filename = log_bin_file.name
-        retDict_tpm2 = cmd_exec.run(cmd=["tpm2_eventlog", "--eventlog-version=2", log_bin_filename], raiseOnError=False)
+        # TODO remove this added for debug
+        #print("\n\nlog_bin_filename:",log_bin_filename)
+        #debug
+        #tpm2_eventlog fails only while using version 2 flag, att is successful on removing this flag
+        #TODO revert to --eventlog-version=2
+        retDict_tpm2 = cmd_exec.run(cmd=["tpm2_eventlog", log_bin_filename], raiseOnError=False)
     log_parsed_strs = retDict_tpm2["retout"]
     if len(retDict_tpm2["reterr"]) > 0:
         failure.add_event(

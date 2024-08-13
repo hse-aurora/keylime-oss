@@ -57,9 +57,14 @@ class ActionHandler(RequestHandler):
 
         # Parse any parameters in the query portion of the URL or in the body of the request
         try:
+            print(len(self.request.body))
             query_params = self.controller.query_params
             form_params = self.controller.form_params
             json_params = self.controller.json_params
+
+            #print(query_params)
+            #print(form_params)
+            #print(json_params)
         except UnicodeError as err:
             # If a URL-encoded parameter (in the URL query string or the request body) includes any non-Unicode bytes,
             # treat this as a kind of "Bad Request"
@@ -71,6 +76,7 @@ class ActionHandler(RequestHandler):
             self.matching_route.call_action(
                 self.controller, self.request.path, {**query_params, **form_params, **json_params}
             )
+            #print({**query_params, **form_params, **json_params})
         except ActionDispatchError as err:
             # If the union of path parameters, query parameters and form parameters do not match the method signature
             # of the action, respond with a "Bad Request" error

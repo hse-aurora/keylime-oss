@@ -6,7 +6,8 @@ import asyncio
 import tornado.process
 
 # from keylime.web import VerifierServer
-from keylime.models.base import db_manager
+from keylime.models import db_manager
+
 
 logger = keylime_logging.init_logging("verifier")
 
@@ -22,7 +23,8 @@ def main() -> None:
     # TODO: Remove
     # cloud_verifier_tornado.main()
 
-    server = VerifierServer()
+    db_manager.make_engine("cloud_verifier")
+    server = VerifierServer(http_port=8881)
     tornado.process.fork_processes(0)
     asyncio.run(server.start())
 

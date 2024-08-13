@@ -31,7 +31,8 @@ class VerfierMain(Base):
     ima_policy = relationship("VerifierAllowlist", back_populates="agent", uselist=False)
     ima_policy_id = Column(Integer, ForeignKey("allowlists.id"))
     ima_sign_verification_keys = Column(Text().with_variant(Text(429400000), "mysql"))
-    mb_refstate = Column(Text().with_variant(Text(429400000), "mysql"))
+    mb_policy = relationship("VerifierMbpolicy", back_populates="agent", uselist=False)
+    mb_policy_id = Column(Integer, ForeignKey("mbpolicies.id"))
     revocation_key = Column(String(2800))
     accept_tpm_hash_algs = Column(JSONPickleType(pickler=JSONPickler))
     accept_tpm_encryption_algs = Column(JSONPickleType(pickler=JSONPickler))
@@ -68,20 +69,28 @@ class VerifierAllowlist(Base):
     ima_policy = Column(Text().with_variant(Text(429400000), "mysql"))
 
 
+
+class VerifierMbpolicy(Base):
+    __tablename__ = "mbpolicies"
+    __table_args__ = (schema.UniqueConstraint("name", name="uniq_mbpolicies_name"),)
+    id = Column(Integer, primary_key=True)
+    agent = relationship("VerfierMain", back_populates="mb_policy")
+    name = Column(String(255), nullable=False)
+    mb_policy = Column(Text().with_variant(Text(429400000), "mysql"))
+
+
 class VerifierAttestations(Base):
     __tablename__ = "attestations"
     agent = relationship("VerfierMain", back_populates="attestation_details")
     agent_id = Column(String(80),  ForeignKey("verifiermain.agent_id"), primary_key=True)
     nonce = Column(String(20))
-    #nonce_created = Column(Integer, server_default=time.time())
     nonce_created = Column(Integer)
     nonce_expires = Column(Integer)
-    status = Column(Enum(AttestationStatusEnum), server_default=AttestationStatusEnum.PENDING.value)
+    status = Column(Enum(AttestationStatusEnum), server_default=AttestationStatusEnum.WAITING.value)
     quote = Column(String(80))
     quote_received = Column(Integer)
     pcrs = Column(Text)
     next_ima_offset = Column(Integer)
-    uefi_logs = Column(Text)
     hash_alg = Column(String(10))
     enc_alg = Column(String(10))
     sign_alg = Column(String(10))

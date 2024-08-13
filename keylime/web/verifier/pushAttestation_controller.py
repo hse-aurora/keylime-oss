@@ -1,9 +1,6 @@
 import sys, time, json
 from typing import Any, Dict
 
-import tornado.web
-import requests
-
 from keylime.web.base import Controller
 from keylime import web_util
 from keylime.tpm import tpm_util
@@ -12,12 +9,14 @@ from keylime import (
     config
 )
 
+from keylime.models.verifier import Attestation
+
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
 from keylime.db.keylime_db import DBEngineManager, SessionManager
-from keylime.db.verifier_db import VerfierMain, VerifierAttestations
+from keylime.db.verifier_db import VerfierMain, VerifierAttestations, VerifierAllowlist, VerifierMbpolicy
 from keylime.agentstates import AgentAttestState, AgentAttestStates
 from keylime.attestationstatus import AttestationStatusEnum
 
@@ -35,91 +34,111 @@ def get_session() -> Session:
     return SessionManager().make_session(engine)
 
 class PushAttestation(Controller):
-    # POST /v3.0/agents/:id/nonce
-    # Generate nonce for push model
+    # GET /v2[.:minor]/agents/
+    def index(self, **params):
+        results = Attestation.all_ids()
 
+        self.respond(200, "Sucess", {"uuids": results})
+    
+    # GET /v2[.:minor]/agents/:agent_id/attestations
+    def show(self, agent_id, **params):
+        last_attestation = Attestation.get_last(agent_id=agent_id)
 
-    """ def fetchAttestationValue(self, id):
+        if not last_attestation:
+            self.respond(404, f"Agent with ID '{agent_id}' not found")
+            return
+
+        self.respond(200, "Success", last_attestation.render())
+
+    # POST /v2[.:minor]/agents/:agent_id/attestations
+    def create(self, agent_id, **params):
+
+        #get agent from verifiermain
         session = get_session()
-        result = session.query(VerifierAttestations).filter_by(VerifierAttestations.agent_id == id).all()
-        for agent_id_values in result:
-            return agent_id_values """
+        agent = session.query(VerfierMain).filter(VerifierAttestations.agent_id == agent_id).one_or_none()
         
-
-
-    def attestations(self, req, id, **params):
-        session = get_session()
-
-        agent_id = id['id']
-        att_result = session.query(VerifierAttestations).filter(VerifierAttestations.agent_id == agent_id).all()
-        for att_values in att_result:
-            att_values
-        
-        agent_result = session.query(VerfierMain).filter(VerifierAttestations.agent_id == agent_id).all()
-        for agent_values in agent_result:
-            agent_values
-        
-            
-        #UPDATE ATTESTATION STATUS
-        """ session.query(VerifierAttestations).filter(VerifierAttestations.agent_id == agent_id).update({VerifierAttestations.status: AttestationStatusEnum.FAILED})
-        session.commit()
-        updated = session.query(VerifierAttestations).filter(VerifierAttestations.agent_id == agent_id, VerifierAttestations.status == AttestationStatusEnum.FAILED).first()
-        if updated:
-            web_util.echo_json_response(req, 200, "Success", {"status":updated.status.to_json()})
-        else:
-            web_util.echo_json_response(req, 404)  """
-        
-
-
-        #web_util.echo_json_response(req, 200, "Success", {"nonce": agent_id_values.agent_id})
+        # get last attestation entry for the agent
+        last_attestation = Attestation.get_last(agent_id = agent_id)
 
         current_timestamp = int(time.time())
-        wait_time = agent_values.last_received_quote - config.getint("verifier","quote_interval")
-        att_failed = session.query(VerifierAttestations).filter(VerifierAttestations.agent_id == agent_id, VerifierAttestations.status == AttestationStatusEnum.FAILED).first()
+
+        # wait_time is the time interval between attestations 
+        wait_time = last_attestation.quote_received + config.getint("verifier","quote_interval")
+        
+        if not agent:
+            self.respond(404)
+            return
         
         if current_timestamp < wait_time:
-            web_util.echo_json_response(req, 429)
-        elif att_failed:
-            web_util.echo_json_response(req, 503)
-        else:
-            nonce = tpm_util.random_password(20)
-            nonce_created = int(time.time())
-            nonce_lifetime = config.getint("verifier","nonce_lifetime")
-            nonce_expires = nonce_created + nonce_lifetime
-            session.query(VerifierAttestations).filter(VerifierAttestations.agent_id == agent_id).update({"nonce": nonce,
-                                                                                                          "nonce_created": nonce_created,
-                                                                                                          "nonce_expires":nonce_expires})
-            session.commit()
-            web_util.echo_json_response(req, 200,"nonce update", {"nonce":att_values.nonce, "offset":agent_values.next_ima_ml_entry})
-    
+                retry_after = wait_time - current_timestamp
+                self.action_handler.set_header("Retry-After", retry_after)
+                self.respond(429)
+                return
+        
+        if last_attestation.status == AttestationStatusEnum.FAILED:
+            self.respond(503)
+            return
+        
+        new_attestation = Attestation.create(agent_id)
 
-    def get_attestations(self, req, id, **params):
+        # Compare new_attestation.nonce_created against last_attestation.quote_receivedz
+
+        new_attestation.commit_changes()
+        self.respond(200, "Success", {"nonce":new_attestation.nonce, 
+                                     "accept_hash_algs": agent.accept_tpm_hash_algs,
+                                     "accept_enc_algs": agent.accept_tpm_encryption_algs,
+                                     "accept_sign_algs": agent.accept_tpm_signing_algs 
+                                     })
+        
+        # TODO (for Jean): Add a field called something like "starting_ima_offset" in the response here so that the agent knows
+        # what ima events to send
+
+    def update(self, agent_id, **params):
+        last_attestation = Attestation.get_last(agent_id = agent_id)
+        #last_attestation = Attestation.get_one(agent_id = agent_id, status = "RECEIVED")
+        current_timestamp = int(time.time())
+
+        # TODO: Replace with calls to VerifierAgent.get(...) and IMAPolicy.get(...)
         session = get_session()
-        agent_id = id['id']
-        atts = session.query(VerifierAttestations).filter(VerifierAttestations.agent_id == agent_id).all()
-        for att in atts:
-            atts_list = {
-                "agent_id": att.agent_id,
-                "nonce": att.nonce,
-                "nonce_created": att.nonce_created,
-                "nonce_expires": att.nonce_expires,
-                "status": att.status.to_json(),
-                "quote": att.quote,
-                "quote_received": att.quote_received,
-                "pcrs": att.pcrs,
-                "next_ima_offset": att.next_ima_offset,
-                "uefi_logs": att.uefi_logs,
-            }
-        web_util.echo_json_response(req, 200, "Success", {"result":atts_list})
+        agent = session.query(VerfierMain).filter(VerfierMain.agent_id == agent_id).one_or_none()
+        allowlist = session.query(VerifierAllowlist).filter(VerifierAllowlist.id == agent.ima_policy_id).one_or_none()
+        mbpolicies = session.query(VerifierMbpolicy).filter(VerifierMbpolicy.id == agent.mb_policy_id).one_or_none()
 
-    
-    """ def update_attestations(self, req, id, **params):
-        session = get_session()
-        content_length = len(self.request.body)
-        web_util.echo_json_response(req, 200, "Success", {"result":content_length})
-        self. """
+        if not last_attestation:
+            self.respond(404)
+            return
+        
+        if last_attestation.status != AttestationStatusEnum.WAITING:
+            self.respond(503)
+            return
+        
+        if last_attestation.nonce_expires < current_timestamp:
+            self.respond(400, "too many request")
+            return
+        
+        last_attestation.update({"agent_id": agent_id, **params}, agent)
 
+        # last_attestation will contain errors if the JSON request is malformed/invalid (e.g., if an unrecognised hash algorithm is provided)
+        # but not if the quote verification fails (including if the quote cannot be verified as authentic, if the IMA/MB logs cannot be verified as
+        # authentic, or if the logs do not meet policy)
+        if not last_attestation.changes_valid:
+            msgs = []
+            for field, errors in last_attestation.errors.items():
+                for error in errors:
+                    msgs.append(f"{field} {error}")
+            self.respond(400, "Bad Request", {"errors": msgs})
+            return
+        
+        # TODO add last_successful_attestation to verifiermain
+        
+        session.add(agent)
+        session.commit()
+        last_attestation.commit_changes()
+        self.respond(200, "Success")
 
+        # Verify attestation after response is sent, so that the agent does not need to wait for the verification to complete
+        # Ideally, in the future, we would want to create a pool of verification worker processes (separate from the web server workers) which will call this method whenever a new verification task is added to a queue
+        last_attestation.verify_quote({"agent_id": agent_id, **params}, allowlist.ima_policy, mbpolicies.mb_policy, agent)
 
 
 

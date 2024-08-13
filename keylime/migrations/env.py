@@ -12,7 +12,7 @@ from keylime.db.keylime_db import DBEngineManager
 from keylime.db.registrar_db import Base as RegistrarBase
 from keylime.db.verifier_db import Base as VerifierBase
 
-sys.path.append("..")
+sys.path.append("../..")
 
 USE_TWOPHASE = False
 
@@ -52,6 +52,7 @@ target_metadata = {"registrar": RegistrarBase.metadata, "cloud_verifier": Verifi
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
 
+#print(context.get_context())
 
 def run_migrations_offline():
     """Run migrations in 'offline' mode.

@@ -425,10 +425,13 @@ IMA_PCR = 10
 # PCRs 0-7: BIOS & UEFI
 # PCRs 8-9: bootloader (grub)
 # PCR 14: MokList, MokListX, and MokSBState
-MEASUREDBOOT_PCRS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15]
+#MEASUREDBOOT_PCRS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15]
+# TODO remove this added for debug
+MEASUREDBOOT_PCRS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15]
 
 LIBEFIVAR = "libefivar.so.1"  # formerly "/usr/lib/x86_64-linux-gnu/libefivar.so"
 
+#TODO change TPM_DATA_PCR = 16
 # this is where data will be bound to a quote, MUST BE RESETABLE!
 TPM_DATA_PCR = 16
 

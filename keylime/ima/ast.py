@@ -394,9 +394,9 @@ class Entry:
             failure.add_event(
                 "ima_hash",
                 {
-                    "message": "IMA template hash does not match the calculated hash.",
+                    "message": f"IMA template hash does not match the calculated hash. {self._ima_hash_alg}",
                     "expected": str(self.ima_template_hash),
-                    "got": str(self.mode.bytes()),
+                    "got": str(self._bytes) + "  |  " + str(self._ima_hash_alg.hash(self._bytes)),
                 },
                 True,
             )

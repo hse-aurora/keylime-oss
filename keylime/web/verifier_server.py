@@ -7,17 +7,17 @@ class VerifierServer(Server):
     def _routes(self):
         # _deprecated_v2_routes
 
-        self.get("/v:version/agents/:id", AgentsController, "show")
-        self.post("/v:version/agents", AgentsController, "create")
-        self.delete("/v:version/agents/:id", AgentsController, "delete")
-        self.post("/v:version/agents/:id/reactivate", AgentsController, "reactivate")
-        self.post("/v:version/agents/:id/stop", AgentsController, "stop")
-        self.post("/v:version/agents/:id/attestations", PushAttestation, "attestations")
-        self.get("/v:version/agents/:id/attestations", PushAttestation, "get_attestations")
-        self.put("/v:version/agents/:id/attestations/latest", PushAttestation, "update_attestations")
+        self._get("/v:version/agents/:agent_id", AgentsController, "show")
+        self._post("/v:version/agents", AgentsController, "create")
+        self._delete("/v:version/agents/:agent_id", AgentsController, "delete")
+        self._post("/v:version/agents/:agent_id/reactivate", AgentsController, "reactivate")
+        self._post("/v:version/agents/:agent_id/stop", AgentsController, "stop")
+        self._post("/v:version/agents/:agent_id/attestations", PushAttestation, "create", allow_insecure = True)
+        self._get("/v:version/agents/:agent_id/attestations", PushAttestation, "show", allow_insecure = True)
+        self._put("/v:version/agents/:agent_id/attestations/latest", PushAttestation, "update", allow_insecure = True)
 
     # @version_range("1.0", "2.0")
     # def _deprecated_v2_routes(self):
-    #     self.post("/v:version/agents/:id", AgentsController, "create")
-    #     self.put("/v:version/agents/:id/reactivate", AgentsController, "reactivate")
-    #     self.put("/v:version/agents/:id/stop", AgentsController, "stop")
+    #     self.post("/v:version/agents/:agent_id", AgentsController, "create")
+    #     self.put("/v:version/agents/:agent_id/reactivate", AgentsController, "reactivate")
+    #     self.put("/v:version/agents/:agent_id/stop", AgentsController, "stop")

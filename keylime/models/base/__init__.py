@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Integer, LargeBinary, String, Text
+from sqlalchemy import Boolean, Integer, LargeBinary, String, Text, Enum
 
 from keylime.models.base.basic_model import BasicModel
 from keylime.models.base.da import da_manager

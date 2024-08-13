@@ -303,7 +303,7 @@ class Controller:
 
     @property
     def json_params(self):
-        if not self._form_params:
+        if not self._json_params:
             content_type = self.action_handler.request.headers.get("Content-Type")
             json_params = {}
 
@@ -314,7 +314,7 @@ class Controller:
                     raise
 
                 if isinstance(json_content, dict):
-                    json_params = json_content
+                    json_params = json_content 
 
             # If the request's Content-Type is not application/json nor multipart/form-data, json_params is left blank.
 
