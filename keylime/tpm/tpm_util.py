@@ -223,6 +223,7 @@ def checkquote(
     pcrblob: The state of the PCRs that were quoted; Intel tpm2-tools specific format
     exp_hash_alg: The hash that was expected to have been used for quoting
     """
+    
     sig_alg, hash_alg, sig_size = struct.unpack_from(">HHH", sigblob, 0)
 
     (signature,) = struct.unpack_from(f"{sig_size}s", sigblob, 6)
