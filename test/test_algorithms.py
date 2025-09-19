@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 
-from keylime.common.algorithms import Encrypt, Hash, Sign
+from keylime.common.algorithms import Key, Hash, Sign
 
 
 class TestHash(unittest.TestCase):
@@ -53,7 +53,7 @@ class TestHash(unittest.TestCase):
         for c in test_cases:
             self.assertEqual(Hash.is_recognized(c["hash"]), c["valid"])
 
-    def test_hexdigest_len(self):
+    def test_get_hex_size(self):
         test_cases = [
             {"hash": "sha1", "len": 40},
             {"hash": "sha256", "len": 64},
@@ -66,7 +66,7 @@ class TestHash(unittest.TestCase):
         ]
 
         for c in test_cases:
-            self.assertEqual(Hash(c["hash"]).hexdigest_len(), c["len"])
+            self.assertEqual(Hash(c["hash"]).get_hex_size(), c["len"])
 
     def test_file_digest(self):
         contents = "x" * (1024 * 1024)
@@ -98,7 +98,7 @@ class TestHash(unittest.TestCase):
                 self.assertEqual(Hash(c["hash"]).file_digest(targetfile), c["digest"], msg=f"hash = {c['hash']}")
 
 
-class TestEncrypt(unittest.TestCase):
+class TestKey(unittest.TestCase):
     def test_is_recognized(self):
         test_cases = [
             {
@@ -120,7 +120,7 @@ class TestEncrypt(unittest.TestCase):
         ]
 
         for c in test_cases:
-            self.assertEqual(Encrypt.is_recognized(c["enc"]), c["valid"], msg=f"enc = {c['enc']}")
+            self.assertEqual(Key.is_recognized(c["enc"]), c["valid"], msg=f"enc = {c['enc']}")
 
 
 class TestSign(unittest.TestCase):
